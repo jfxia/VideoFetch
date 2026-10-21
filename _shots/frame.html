@@ -46,7 +46,10 @@
       color: #56606e;
       max-width: 470px;
       margin-bottom: 26px;
+      text-wrap: pretty;
     }
+    /* 「保存」这类按钮名被劈成「「保 / 存」」很难看，整体不拆 */
+    .nw { white-space: nowrap; }
     ul { list-style: none; display: flex; flex-direction: column; gap: 11px; }
     li {
       position: relative;
@@ -102,15 +105,20 @@
 
   <script>
     const q = new URLSearchParams(location.search);
+    const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
     const put = (id, v) => { if (v) document.getElementById(id).textContent = v; };
     put('eyebrow', q.get('eyebrow'));
     // 标题里的 \n 是手工断行：免得浏览器按字宽把短语劈成「…screen / recording」
     const title = q.get('t');
     if (title) {
-      const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
       document.getElementById('title').innerHTML = title.split('\n').map(esc).join('<br>');
     }
-    put('desc', q.get('d'));
+    // 说明里的「按钮名」整段不拆行
+    const desc = q.get('d');
+    if (desc) {
+      document.getElementById('desc').innerHTML =
+        esc(desc).replace(/「([^」]*)」/g, '<span class="nw">「$1」</span>');
+    }
     put('foot', q.get('foot'));
     document.getElementById('img').src = q.get('img');
     if (q.get('wide')) document.getElementById('shot').classList.add('wide');
