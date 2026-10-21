@@ -4,7 +4,7 @@ English · [简体中文](README.zh-CN.md)
 
 A Manifest V3 extension for Edge and Chrome. It downloads the media a page is already playing: HLS playlists, live streams, plain MP4 files, and media that reaches the player only as a `blob:` URL.
 
-<img src="store/screenshot-1-sources-en.png" width="720" alt="Video source list with a quality picker">
+<img src="docs/screenshot-1-sources-en.png" width="720" alt="Video source list with a quality picker">
 
 ## Features
 
@@ -17,7 +17,7 @@ A Manifest V3 extension for Edge and Chrome. It downloads the media a page is al
 - **Save location**: the browser download folder with an optional subfolder, or any folder selected once on the settings page. Files of the same name are numbered `(2)` rather than overwritten.
 - **Interface language**: English by default, Chinese when the browser language is Chinese. Either can be pinned in settings.
 
-<img src="store/screenshot-2-tasks-zh.png" width="720" alt="Download tasks, one running and one paused with a saved snapshot">
+<img src="docs/screenshot-2-tasks-zh.png" width="720" alt="Download tasks, one running and one paused with a saved snapshot">
 
 ## Install
 
@@ -102,9 +102,9 @@ Three implementation decisions are worth recording:
 - **Saving produces a snapshot, not a completed file**: each save copies the progress so far and occupies temporary space in OPFS.
 - **Ranged resume depends on the server**: files that ignore `Range` restart from zero, and an MP4 with `moov` at the end cannot play after truncation.
 
-## Store assets
+## Screenshots
 
-`store/` holds the Edge Add-ons material: icon, screenshots, promotional tiles, listing copy in both languages, and the privacy policy. `python _dev/make-store-art.py` regenerates the images, which are rendered from the real popup and settings pages with fixed data.
+The two images above live in `docs/`. They are rendered, not drawn: `_dev/make-store-art.py` captures the real popup pages at 2× and composes them onto a 1280×800 canvas. The same script also produces the Edge Add-ons listing material — icon, promotional tiles, listing copy, privacy policy — into `store/`, which stays on the machine and is not committed.
 
 ## Licence
 

@@ -4,7 +4,7 @@
 
 Edge / Chrome 扩展（Manifest V3）。识别网页正在播放的媒体地址，下载 HLS 分片、流式 MP4 与直链音视频，在本地合并为单个可播放文件。
 
-<img src="store/screenshot-1-sources-en.png" width="720" alt="视频源列表与清晰度选择">
+<img src="docs/screenshot-1-sources-en.png" width="720" alt="视频源列表与清晰度选择">
 
 ## 功能
 
@@ -17,7 +17,7 @@ Edge / Chrome 扩展（Manifest V3）。识别网页正在播放的媒体地址�
 - **保存位置**：默认写入浏览器下载文件夹，可指定子目录；也可在设置页选择本机任意文件夹。同名文件自动追加序号，不覆盖已有文件。
 - **界面语言**：默认英文，浏览器语言为中文时使用中文，可在设置中固定为其中一种。
 
-<img src="store/screenshot-2-tasks-zh.png" width="720" alt="下载任务：一个正在下载，一个已暂停并保存过快照">
+<img src="docs/screenshot-2-tasks-zh.png" width="720" alt="下载任务：一个正在下载，一个已暂停并保存过快照">
 
 ## 安装
 
@@ -79,7 +79,7 @@ Edge / Chrome 扩展（Manifest V3）。识别网页正在播放的媒体地址�
 
 ## 目录结构
 
-源码位于仓库根目录，**`dist/` 是唯一可加载的运行产物**（`_dev/`、`_shots/`、`store/` 均不进入安装包）。
+源码位于仓库根目录，**`dist/` 是唯一可加载的运行产物**（`_dev/`、`_shots/` 均不进入安装包）。
 
 ```
 dist/                            构建输出，加载扩展选这一层
@@ -150,9 +150,9 @@ node _dev/test-pause.mjs        #  82  暂停 / 继续 / 快照保存（慢速�
 - **直链续传依赖 `Range`**：服务器不支持则从头重新下载；`moov` 位于文件尾部的 MP4 被截断后无法播放，这是容器格式决定的。
 - 部分站点的分片带一次性签名，暂停过久再续可能失败。
 
-## 商店资料
+## 截图
 
-`store/` 存放 Edge Add-ons 上架所需的材料：图标、截图、宣传图、中英文案与隐私政策。图片由 `python _dev/make-store-art.py` 重新生成，均为真实 popup 与 settings 页面配合固定数据渲染所得。
+上文两张图放在 `docs/`。图是渲染出来的，不是画的：`_dev/make-store-art.py` 以 2 倍像素截取真实 popup 页面，再合成到 1280×800 画布上。同一个脚本还产出 Edge Add-ons 上架材料——图标、宣传图、中英文案、隐私政策——写入 `store/`，仅保存在本机，不纳入仓库。
 
 ## 许可
 

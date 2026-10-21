@@ -16,6 +16,9 @@
   promo-small-440x280.png     440x280  小型宣传图块
   promo-large-1400x560.png    1400x560 大型宣传图块
 
+store/ 不入库（见 .gitignore）。README 引用的两张截图（screenshot-1、screenshot-2）
+每次生成后复制到 docs/，随仓库走。
+
 截图不是画的：_shots/ 下那几个页面直接引用 popup / settings 的 CSS 与脚本，
 只把后台换成一小组固定数据，所以图里的界面和装好扩展后看到的是同一套样式。
 需要 Pillow（生成图标）与 Chrome。
@@ -34,7 +37,11 @@ from PIL import Image, ImageDraw
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STORE = os.path.join(ROOT, 'store')
 SHOTS = os.path.join(ROOT, '_shots')
+DOCS = os.path.join(ROOT, 'docs')
 CHROME = r'C:\Program Files\Google\Chrome\Application\chrome.exe'
+
+# README 引用的截图。store/ 只留在本机，这两张复制到 docs/ 随仓库走。
+README_SHOTS = ('screenshot-1-sources-en.png', 'screenshot-2-tasks-zh.png')
 
 SS = 8  # 超采样
 
@@ -206,6 +213,7 @@ def shots(port):
     os.makedirs(raw_dir, exist_ok=True)
     out_dir = os.path.join(SHOTS, 'out')
     os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(DOCS, exist_ok=True)
 
     # 1) 截 popup / settings 本体
     plan = [
@@ -237,6 +245,11 @@ def shots(port):
         p = os.path.join(STORE, f['file'])
         im.save(p, 'PNG', optimize=True)
         print('  %-30s %dx%d  %d B' % (f['file'], im.size[0], im.size[1], os.path.getsize(p)))
+
+    # 3) README 用的两张复制到 docs/（store/ 不入库）
+    for name in README_SHOTS:
+        shutil.copyfile(os.path.join(STORE, name), os.path.join(DOCS, name))
+        print('  docs/%-26s %d B' % (name, os.path.getsize(os.path.join(DOCS, name))))
 
 
 # ---------------------------------------------------------------- 宣传图

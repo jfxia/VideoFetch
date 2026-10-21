@@ -2,6 +2,9 @@
 /dist/
 *.zip
 
+# store listing material stays local; only the README images under docs/ are committed
+/store/
+
 # test output
 _dev/*.mp4
 _dev/*.m4a
