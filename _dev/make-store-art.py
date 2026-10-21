@@ -274,6 +274,14 @@ def main():
         finally:
             srv.shutdown()
     if only('--promo'):
+        # 宣传图里嵌了面板截图，单独跑 --promo 时先补一次
+        if not os.path.isfile(os.path.join(SHOTS, 'out', 'sources-en.png')):
+            print('  缺少面板图，先出截图')
+            srv, port = serve()
+            try:
+                shots(port)
+            finally:
+                srv.shutdown()
         promo()
 
 
