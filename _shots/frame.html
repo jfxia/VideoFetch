@@ -104,7 +104,12 @@
     const q = new URLSearchParams(location.search);
     const put = (id, v) => { if (v) document.getElementById(id).textContent = v; };
     put('eyebrow', q.get('eyebrow'));
-    put('title', q.get('t'));
+    // 标题里的 \n 是手工断行：免得浏览器按字宽把短语劈成「…screen / recording」
+    const title = q.get('t');
+    if (title) {
+      const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+      document.getElementById('title').innerHTML = title.split('\n').map(esc).join('<br>');
+    }
     put('desc', q.get('d'));
     put('foot', q.get('foot'));
     document.getElementById('img').src = q.get('img');
