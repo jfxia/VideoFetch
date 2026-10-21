@@ -2,46 +2,46 @@
 
 English · [简体中文](README.zh-CN.md)
 
-A Manifest V3 extension for Edge and Chrome that downloads the video a page is playing: HLS playlists, live streams, plain MP4, and players that only expose a `blob:` URL.
+A Manifest V3 extension for Edge and Chrome. It downloads the media a page is already playing: HLS playlists, live streams, plain MP4 files, and media that reaches the player only as a `blob:` URL.
 
 <img src="store/screenshot-1-sources-en.png" width="720" alt="Video source list with a quality picker">
 
-## What it does
+## Features
 
-- **Finds the stream.** Four channels feed the list, so a site that hides its player from one of them usually shows up in another: response headers via `webRequest`, page-level `fetch`/`XHR` hooks, JSON API response bodies that carry a video manifest, and Resource Timing as a last resort.
-- **Downloads in parallel.** HLS segments are fetched eight at a time and delivered in order. TS segments are remuxed to fMP4 with mux.js; fMP4 segments are concatenated directly. Plain files fall back to 4 MB ranged chunks.
-- **Keeps the audio.** HLS audio renditions (`EXT-X-MEDIA`) are downloaded and merged back. When a site serves video and audio as two separate files, VideoFetch fetches the paired HLS playlist to get the sound. MSE players that push two `SourceBuffer`s get both recorded and joined.
-- **Pause and resume.** Pause takes effect immediately — in-flight requests are aborted after 400 ms and the segment cursor stays put. Resume continues from that cursor. "Save" writes the current progress to a second file (`clip (40%).mp4`) and leaves the task running.
-- **Records live streams.** A playlist without `#EXT-X-ENDLIST` is treated as live and polled at its target duration. You stop it when you want; the file is finished then.
-- **Handles the annoying parts.** AES-128 segment keys, `EXT-X-BYTERANGE`, servers that ignore `Range`, and CDNs that reject a request without the right `Referer` (a session DNR rule, verified with a one-byte probe before the download starts).
-- **Saves where you want.** The browser download folder with an optional subfolder, or any folder you pick once on the settings page. Files with the same name get a `(2)` suffix instead of being overwritten.
-- **Speaks two languages.** English by default; Chinese when the browser is Chinese. Switchable in settings.
+- **Source discovery**: four channels feed the list: response headers read through `webRequest`, hooks on the page's `fetch` and `XHR`, manifests carried in JSON API responses, and Resource Timing as a last resort. A site that hides its player from one channel usually appears in another.
+- **Parallel download**: HLS segments are fetched eight at a time and delivered in playback order. TS segments are remuxed to fMP4 with mux.js; fMP4 segments are concatenated directly. Plain files are fetched in 4 MB chunks when the server accepts `Range`.
+- **Audio**: renditions declared through `EXT-X-MEDIA` are downloaded separately and merged back onto the video timeline. Where a site serves video and audio as two files, the paired HLS playlist is fetched to obtain the audio. MSE players that append to two `SourceBuffer`s are recorded on both tracks and joined afterwards.
+- **Pause and resume**: pausing stops new requests immediately and aborts those in flight after 400 ms; downloaded segments and the cursor are retained. Resuming continues from the cursor. *Save* writes the progress so far to a second file (`clip (40%).mp4`) and leaves the task active.
+- **Live streams**: a playlist without `#EXT-X-ENDLIST` is treated as live and polled at its target duration. Recording ends when the user stops it.
+- **Encryption and edge cases**: AES-128 segment keys are fetched and applied, `EXT-X-BYTERANGE` is honoured, servers that ignore `Range` are handled by trimming locally, and CDNs that require a `Referer` receive a session DNR rule verified with a one-byte range request before the download starts.
+- **Save location**: the browser download folder with an optional subfolder, or any folder selected once on the settings page. Files of the same name are numbered `(2)` rather than overwritten.
+- **Interface language**: English by default, Chinese when the browser language is Chinese. Either can be pinned in settings.
 
 <img src="store/screenshot-2-tasks-zh.png" width="720" alt="Download tasks, one running and one paused with a saved snapshot">
 
 ## Install
 
-### Load the unpacked build
+### Loading the unpacked build
 
-1. Run `python _dev/build.py` (or use a release zip, unpacked)
+1. Run `python _dev/build.py`, or unpack a release archive
 2. Open `edge://extensions/` (Chrome: `chrome://extensions/`)
-3. Turn on **Developer mode**
-4. **Load unpacked** → pick `dist/`
-5. Refresh the page you want to download from — content scripts only run at page load
+3. Enable **Developer mode**
+4. Choose **Load unpacked** and select `dist/`
+5. Reload the page to be downloaded; content scripts run only at page load
 
 ### Store
 
-The listing is prepared but not published yet. When it is, this section will carry the link.
+The listing is prepared but not published yet. The link will be added here once it is available.
 
-## Using it
+## Usage
 
-1. Play the video for a second or two. The list fills as the page requests media.
-2. Click the toolbar icon. Each video gets one card; multiple qualities of the same video collapse into one dropdown, highest first.
-3. Pick a quality and hit **Download**.
-4. Switch to **Downloads** for progress. Every task has pause/resume and save. Live tasks only have **Stop and save**.
-5. Files go to `Downloads/VideoFetch/` unless you change it in **Settings** (bottom right).
+1. Play the video briefly. The list fills as the page requests media.
+2. Open the popup. Each video appears as one card; the qualities of the same video are collected into a single dropdown, highest first.
+3. Select a quality and choose **Download**.
+4. Switch to **Downloads** to follow progress. Every task provides pause, resume and save; live tasks provide **Stop and save** only.
+5. Files are written to `Downloads/VideoFetch/` unless changed in **Settings** at the bottom right.
 
-The **Diagnostics** panel shows whether the page hooks are installed, how many requests were inspected, and which media-looking URLs were rejected — useful when a site shows nothing.
+The **Diagnostics** panel reports whether the page hooks are installed, how many requests were inspected, and which media-like URLs were rejected. It is the first place to look when a site yields no sources.
 
 ## Build
 
@@ -49,11 +49,11 @@ The **Diagnostics** panel shows whether the page hooks are installed, how many r
 python _dev/build.py
 ```
 
-Copies the source into `dist/`, checks that every path referenced by `manifest.json` exists, and packs `VideoFetch-<version>.zip`. `_dev/` and `_shots/` are not included.
+The script copies the source into `dist/`, checks that every path referenced by `manifest.json` exists, and packs `VideoFetch-<version>.zip`. `_dev/` and `_shots/` are excluded from the package.
 
 ## Tests
 
-No test framework; each suite is a Node script with its own assertions. `_dev/serve.mjs` serves the fixtures with `Range` support and an optional `?delay=` / `?rate=` so timing behaviour can be reproduced.
+No test framework is used; each suite is a Node script with its own assertions. `_dev/serve.mjs` serves the fixtures with `Range` support, and `?delay=` or `?rate=` reproduces a slow link when timing behaviour has to be checked.
 
 ```bash
 node _dev/serve.mjs 8898        # fixtures at http://127.0.0.1:8898/player.html
@@ -69,7 +69,7 @@ node _dev/test-referer.mjs      #  23  referer decisions against a fake fetch
 node _dev/test-pause.mjs        #  82  pause, resume, snapshot saving on slow fixtures
 ```
 
-398 checks in total. Fixtures are real media generated with ffmpeg, plus one CMAF set pulled from a live HLS feed to lock down the split-audio path.
+398 checks in total. The fixtures are real media generated with ffmpeg, plus one CMAF set taken from a live HLS feed to cover the split-audio path.
 
 ## How it works
 
@@ -79,32 +79,32 @@ node _dev/test-pause.mjs        #  82  pause, resume, snapshot saving on slow fi
 | `content/inject.js` | MAIN world. Hooks `fetch`, `XHR`, `createObjectURL` and `MediaSource` |
 | `content/content.js` | ISOLATED world. Forwards events, carries recorded bytes back to the extension |
 | `offscreen/engine.js` | The download engine: concurrency, live polling, decryption, remuxing, writing files |
-| `lib/m3u8.js`, `lib/remux.js`, `lib/mp4time.js` | Playlist parsing, TS→fMP4 assembly, timestamp normalisation and `moov` duration patching |
+| `lib/m3u8.js`, `lib/remux.js`, `lib/mp4time.js` | Playlist parsing, TS to fMP4 assembly, timestamp normalisation and `moov` duration patching |
 | `lib/store.js` | Segment staging, OPFS first with an in-memory fallback |
 | `lib/settings.js`, `lib/fsdir.js`, `lib/i18n.js` | Save location, folder handles, both language tables |
 
-Three decisions worth knowing:
+Three implementation decisions are worth recording:
 
-- **Downloads run in an offscreen document.** A service worker gets recycled and has no DOM, so it cannot create a Blob URL for `chrome.downloads`.
-- **Timestamps are kept, then shifted.** mux.js 6.3's `setBaseMediaDecodeTime` does not take effect on this path (segments overlap), so the remuxer keeps the original PTS and `lib/mp4time.js` shifts `tfdt` afterwards.
-- **Blob sources are recorded through `SourceBuffer`.** Whatever the player does, media data eventually passes through `appendBuffer`. That is the one hook that does not depend on site internals.
+- **Downloads run in an offscreen document**: a service worker is recycled and has no DOM, so it cannot create the Blob URL that `chrome.downloads` requires.
+- **Timestamps are preserved, then shifted**: `setBaseMediaDecodeTime` in mux.js 6.3 has no effect on this path because segment timestamps overlap, so the remuxer keeps the original PTS and `lib/mp4time.js` shifts `tfdt` afterwards.
+- **Blob sources are captured at `SourceBuffer`**: whatever the player does, media data passes through `appendBuffer`, which is the only hook independent of site internals.
 
 ## Known limits
 
-- **No DRM.** Widevine, FairPlay and `SAMPLE-AES` streams report an error.
-- **HEVC / AC3 in TS** are saved as `.ts` — mux.js only handles H.264 with AAC or MP3.
-- **Blob recording only captures what has played**, up to roughly 400 MB, and cannot be paused.
-- **Live streams must be stopped by hand**, and a paused live stream loses the missed part.
-- **Live audio renditions are not merged** yet; a live recording can end up silent.
-- **Pause state lives in the background page.** Reloading the extension loses the bookmark and the task has to restart.
-- **Sniffing needs a page load.** Install or reload the extension, then refresh the tab. Privileged pages (`chrome://`, extension stores) never work.
-- **Custom folders need one gesture.** The folder picker only opens from the settings page; when permission lapses, downloads fall back to the browser folder and the task card says so.
-- **Saving is a snapshot, not a finish.** Each save copies the current file (temporary space in OPFS, removed when the download completes).
-- **Ranged resume depends on the server.** Files that ignore `Range` restart from zero; an MP4 with `moov` at the end cannot play after being truncated.
+- **DRM is not supported**: Widevine, FairPlay and `SAMPLE-AES` streams return an error.
+- **HEVC and AC3 in TS** are saved as `.ts`, as mux.js handles H.264 with AAC or MP3 only.
+- **Blob recording captures only what has played**, up to roughly 400 MB, and cannot be paused.
+- **Live streams must be stopped manually**; a paused live recording loses the part that was not captured.
+- **Live audio renditions are not merged** at present, so a live recording may end up silent.
+- **Pause state is held in the background context**: reloading the extension discards the cursor and the task has to start over.
+- **Discovery requires a page load**: after installing or reloading the extension, refresh the tab. Privileged pages such as `chrome://` and the extension stores are not supported.
+- **A custom folder requires one gesture**: the picker opens only from the settings page. If the permission lapses, downloads fall back to the browser folder and the task reports where the file was actually saved.
+- **Saving produces a snapshot, not a completed file**: each save copies the progress so far and occupies temporary space in OPFS.
+- **Ranged resume depends on the server**: files that ignore `Range` restart from zero, and an MP4 with `moov` at the end cannot play after truncation.
 
 ## Store assets
 
-`store/` holds the Edge Add-ons material: icon, screenshots, promotional tiles, listing copy in both languages and the privacy policy. `python _dev/make-store-art.py` regenerates the images — they are rendered from the real popup and settings pages with fixed data, not drawn by hand.
+`store/` holds the Edge Add-ons material: icon, screenshots, promotional tiles, listing copy in both languages, and the privacy policy. `python _dev/make-store-art.py` regenerates the images, which are rendered from the real popup and settings pages with fixed data.
 
 ## Licence
 
