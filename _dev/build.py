@@ -133,15 +133,41 @@ def walk_size(path):
     return files, total
 
 
+LOCALE_LIMITS = {'extName': 45, 'extDesc': 132}
+
+
+def verify_locales():
+    """商店对名称与描述有长度上限，超了在 Partner Center 上传时直接被拒。"""
+    bad = []
+    checked = 0
+    loc_dir = os.path.join(DIST, '_locales')
+    for loc in sorted(os.listdir(loc_dir)):
+        fp = os.path.join(loc_dir, loc, 'messages.json')
+        if not os.path.isfile(fp):
+            continue
+        with open(fp, encoding='utf-8') as fh:
+            data = json.load(fh)
+        for key, limit in LOCALE_LIMITS.items():
+            msg = (data.get(key) or {}).get('message') or ''
+            checked += 1
+            if len(msg) > limit:
+                bad.append('%s/%s %d > %d' % (loc, key, len(msg), limit))
+    if bad:
+        raise SystemExit('locale 文案超长: ' + '; '.join(bad))
+    return checked
+
+
 def main():
     clean_dist()
     copied = copy_payload()
     version, refs = verify_manifest()
+    loc_n = verify_locales()
     zip_path, zip_n = make_zip(version)
     files, total = walk_size(DIST)
 
     print('dist/ 就绪: %d 个文件, %.1f KB' % (files, total / 1024.0))
     print('manifest 引用校验: %d 处，全部存在' % refs)
+    print('locale 文案校验: %d 项在商店长度上限内' % loc_n)
     print('zip: %s (%d 个文件, %.1f KB)' % (os.path.basename(zip_path), zip_n,
                                            os.path.getsize(zip_path) / 1024.0))
     print()

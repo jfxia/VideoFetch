@@ -4,7 +4,7 @@
     "description": "Extension name shown in the browser"
   },
   "extDesc": {
-    "message": "嗅探网页中的视频源并下载：支持 HLS(m3u8)、HLS 直播、流式 MP4(fMP4)、blob 播放源，多线程分片下载并合并为单个 MP4。",
+    "message": "嗅探网页中的视频源并下载：HLS（m3u8）、直播 HLS、流式 MP4（fMP4）与 blob 播放源，分片并行下载，合并为单个 MP4。",
     "description": "Extension description"
   },
   "actionTitle": {
