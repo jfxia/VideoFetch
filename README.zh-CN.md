@@ -12,6 +12,7 @@ Edge / Chrome 扩展（Manifest V3）。识别网页正在播放的媒体地址�
 - **并发下载**：HLS 分片按八个并发获取，按播放顺序交付；TS 分片经 mux.js 转换为 fMP4，fMP4 分片直接拼接；普通文件在服务器接受 `Range` 时按 4 MB 分块下载。
 - **音轨处理**：`EXT-X-MEDIA` 声明的独立音轨单独下载后按时间轴合并回视频；音视频分作两个文件的站点，改取配对的 HLS 播放列表以获得声音；向两个 `SourceBuffer` 追加数据的 MSE 播放器，两条轨道分别录制后合并。
 - **暂停与继续**：暂停后立即停止发起新请求，在途请求于 400 毫秒后中止，已下载分片与游标保留；继续时自游标处恢复。「保存」将当前进度另存为第二个文件（`片名 (40%).mp4`），任务保持活动状态。
+- **打开成品**：已完成的文件与中途保存的快照，可从任务卡直接用系统默认程序打开；文件已不在保存位置时，退回在下载列表中定位。
 - **直播录制**：不含 `#EXT-X-ENDLIST` 的播放列表按直播处理，按目标时长轮询分片，结束时刻由用户决定。
 - **边界情况**：AES-128 分片密钥自动获取并解密；支持 `EXT-X-BYTERANGE`；服务端忽略 `Range` 时在本地截取；仅接受指定 `Referer` 的 CDN，安装一条会话级 DNR 规则，并在下载前以 1 字节的 Range 请求验证该规则是否生效。
 - **保存位置**：默认写入浏览器下载文件夹，可指定子目录；也可在设置页选择本机任意文件夹。同名文件自动追加序号，不覆盖已有文件。
@@ -126,7 +127,7 @@ node _dev/serve.mjs 8898        # 夹具在 http://127.0.0.1:8898/player.html
 node _dev/test-e2e.mjs          #  38  解析 / 转封装 / 解密
 node _dev/test-engine.mjs       #  62  引擎全流程（mock chrome API）
 node _dev/test-merge.mjs        #  21  fMP4 音轨合并
-node _dev/test-popup.mjs        #  71  源列表、档位选择、任务卡按钮、英文界面
+node _dev/test-popup.mjs        #  77  源列表、档位选择、任务卡按钮、英文界面
 node _dev/test-settings.mjs     #  82  子目录规整、设置读写、词表对齐、写自定义文件夹
 node _dev/test-sniff.mjs        #  11  后台嗅探与归属
 node _dev/test-inject.mjs       #   8  页面 hook（vm 沙箱）
@@ -134,7 +135,7 @@ node _dev/test-referer.mjs      #  23  防盗链决策（假 fetch）
 node _dev/test-pause.mjs        #  82  暂停 / 继续 / 快照保存（慢速夹具）
 ```
 
-合计 398 项。夹具为 ffmpeg 生成的真实媒体，另有一组取自线上 HLS 的 CMAF 分片，用于覆盖「分离音轨合并」这条路径。
+合计 404 项。夹具为 ffmpeg 生成的真实媒体，另有一组取自线上 HLS 的 CMAF 分片，用于覆盖「分离音轨合并」这条路径。
 
 ## 已知限制
 

@@ -79,8 +79,35 @@ function toast(msg) {
   }, 2600);
 }
 
-/* ---------------- 初始化 ---------------- */
+/* 交给系统默认程序打开已落盘的文件。文件被移走或删掉时，退回「在文件夹中显示」 */
+function downloadsOpen(id) {
+  return new Promise((resolve, reject) => {
+    chrome.downloads.open(id, () => {
+      const err = chrome.runtime.lastError;
+      if (err) reject(new Error(err.message || String(err)));
+      else resolve();
+    });
+  });
+}
 
+async function openSaved(id) {
+  if (id == null) {
+    chrome.downloads.showDefaultFolder();
+    return;
+  }
+  try {
+    await downloadsOpen(id);
+  } catch {
+    toast(t('toast.openFail'));
+    try {
+      chrome.downloads.show(id);
+    } catch {
+      chrome.downloads.showDefaultFolder();
+    }
+  }
+}
+
+/* ---------------- 初始化 ---------------- */
 async function init() {
   bootLang();
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -930,10 +957,7 @@ function taskCard(task) {
         } else {
           const ob = el('button', 'btn ghost sm', t('btn.openSnap'));
           ob.title = task.snapName || t('title.openSnap');
-          ob.addEventListener('click', () => {
-            if (task.snapDownloadId != null) chrome.downloads.show(task.snapDownloadId);
-            else chrome.downloads.showDefaultFolder();
-          });
+          ob.addEventListener('click', () => openSaved(task.snapDownloadId));
           acts.appendChild(ob);
         }
       }
@@ -950,6 +974,12 @@ function taskCard(task) {
     // 存进自定义文件夹时没有 downloadId，浏览器也没法替我们打开那个目录：
     // 就不放按钮了，目录名已经在副标题里
     if (task.savedTo !== 'dir') {
+      if (task.downloadId != null) {
+        const ob = el('button', 'btn ghost sm', t('btn.openFile'));
+        ob.title = t('title.openFile');
+        ob.addEventListener('click', () => openSaved(task.downloadId));
+        acts.appendChild(ob);
+      }
       const b = el('button', 'btn ghost sm', t('btn.openFolder'));
       b.addEventListener('click', () => {
         if (task.downloadId != null) chrome.downloads.show(task.downloadId);

@@ -24,6 +24,7 @@ function ok(cond, label, extra) {
 /* ---------- 最小 DOM ---------- */
 const nodes = new Map();
 const sent = [];
+const dl = { opened: [], shown: [], folders: 0, failOpen: false };
 
 function makeEl(tag) {
   const e = {
@@ -131,7 +132,16 @@ const ctx = {
       },
       onMessage: { addListener() {} }
     },
-    downloads: { showDefaultFolder() {}, show() {} }
+    downloads: {
+      showDefaultFolder() { dl.folders++; },
+      show(id) { dl.shown.push(id); },
+      // 真实接口走 callback + chrome.runtime.lastError，桩按同一套写法
+      open(id, cb) {
+        if (dl.failOpen) ctx.chrome.runtime.lastError = { message: 'File not found' };
+        else dl.opened.push(id);
+        try { if (cb) cb(); } finally { delete ctx.chrome.runtime.lastError; }
+      }
+    }
   }
 };
 ctx.window = ctx;
@@ -422,6 +432,10 @@ console.log('\n[8] 任务卡：暂停 / 继续 / 保存');
   ok(/继续\/保存\/打开快照\/取消/.test(labels(snapped)), '存过快照：多一个「打开快照」', labels(snapped));
   ok(/快照 3.2/.test(textOf(snapped)), '副标题显示快照体积', textOf(snapped));
 
+  dl.opened.length = 0;
+  await findByLabel(snapped, '打开快照').dispatch('click');
+  ok(dl.opened.indexOf(7) >= 0, '「打开快照」用系统默认程序打开', JSON.stringify(dl.opened));
+
   const live = render(mkTask({ status: 'running', live: true, progress: -1 }));
   ok(/暂停/.test(labels(live)) && !/保存/.test(labels(live).replace('停止并保存', '')),
     '直播：只给暂停与「停止并保存」', labels(live));
@@ -468,8 +482,31 @@ console.log('\n[9] 自定义文件夹：不给「打开文件夹」（浏览器�
   ok(/Videos/.test(textOf(dirTask)), '卡片上标出目录名', textOf(dirTask));
 
   const dlTask = render(mkTask({ savedTo: 'downloads', downloadId: 9 }));
-  ok(buttons(dlTask).length === 1, '下载目录：仍是「打开所在文件夹」');
-  ok(/打开所在文件夹/.test(textOf(dlTask)), '按钮文案正确', textOf(dlTask));
+  ok(buttons(dlTask).length === 2, '下载目录：打开文件 + 打开所在文件夹', String(buttons(dlTask).length));
+  ok(/打开文件/.test(textOf(dlTask)), '按钮文案正确', textOf(dlTask));
+
+  const btnOf = (card, label) => buttons(card).find((b) => b.textContent === label);
+  dl.opened.length = 0;
+  dl.shown.length = 0;
+  await btnOf(dlTask, '打开文件').dispatch('click');
+  ok(dl.opened.indexOf(9) >= 0, '点「打开文件」交给系统默认程序', JSON.stringify(dl.opened));
+  await btnOf(dlTask, '打开所在文件夹').dispatch('click');
+  ok(dl.shown.indexOf(9) >= 0, '点「打开所在文件夹」仍在文件夹中定位', JSON.stringify(dl.shown));
+
+  // 文件被移走或删掉时 downloads.open 会报错，此时退回定位并说明
+  dl.opened.length = 0;
+  dl.shown.length = 0;
+  dl.failOpen = true;
+  await btnOf(dlTask, '打开文件').dispatch('click');
+  // 桩里的 getElementById 永远返回元素，toast 走 nodes 取
+  const toastEl = nodes.get('toast');
+  ok(dl.shown.indexOf(9) >= 0, '打不开时退回「在文件夹中显示」', JSON.stringify(dl.shown));
+  ok(toastEl && /下载列表/.test(toastEl.textContent), '并提示文件已不在原位置', toastEl ? toastEl.textContent : '无提示');
+  dl.failOpen = false;
+
+  const noId = render(mkTask({ savedTo: 'downloads' }));
+  ok(buttons(noId).length === 1 && /打开所在文件夹/.test(textOf(noId)),
+    '没有 downloadId 时只给「打开所在文件夹」', String(buttons(noId).length));
 
   // 回退时（自定义目录不可用）要说明存到哪儿了
   const fellBack = render(mkTask({ savedTo: 'downloads', downloadId: 9, saveWarn: 'no-perm' }));

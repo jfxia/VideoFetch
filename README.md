@@ -12,6 +12,7 @@ A Manifest V3 extension for Edge and Chrome. It downloads the media a page is al
 - **Parallel download**: HLS segments are fetched eight at a time and delivered in playback order. TS segments are remuxed to fMP4 with mux.js; fMP4 segments are concatenated directly. Plain files are fetched in 4 MB chunks when the server accepts `Range`.
 - **Audio**: renditions declared through `EXT-X-MEDIA` are downloaded separately and merged back onto the video timeline. Where a site serves video and audio as two files, the paired HLS playlist is fetched to obtain the audio. MSE players that append to two `SourceBuffer`s are recorded on both tracks and joined afterwards.
 - **Pause and resume**: pausing stops new requests immediately and aborts those in flight after 400 ms; downloaded segments and the cursor are retained. Resuming continues from the cursor. *Save* writes the progress so far to a second file (`clip (40%).mp4`) and leaves the task active.
+- **Opening the result**: a finished download or a saved snapshot opens with the system default program straight from its task card. If the file has since been moved, the button falls back to locating it in the download list.
 - **Live streams**: a playlist without `#EXT-X-ENDLIST` is treated as live and polled at its target duration. Recording ends when the user stops it.
 - **Encryption and edge cases**: AES-128 segment keys are fetched and applied, `EXT-X-BYTERANGE` is honoured, servers that ignore `Range` are handled by trimming locally, and CDNs that require a `Referer` receive a session DNR rule verified with a one-byte range request before the download starts.
 - **Save location**: the browser download folder with an optional subfolder, or any folder selected once on the settings page. Files of the same name are numbered `(2)` rather than overwritten.
@@ -61,7 +62,7 @@ node _dev/serve.mjs 8898        # fixtures at http://127.0.0.1:8898/player.html
 node _dev/test-e2e.mjs          #  38  playlist parsing, remuxing, decryption
 node _dev/test-engine.mjs       #  62  full engine runs against a mocked chrome API
 node _dev/test-merge.mjs        #  21  fMP4 audio merging
-node _dev/test-popup.mjs        #  71  source list, quality picker, task buttons, English UI
+node _dev/test-popup.mjs        #  77  source list, quality picker, task buttons, English UI
 node _dev/test-settings.mjs     #  82  subfolder normalisation, settings, i18n, folder writing
 node _dev/test-sniff.mjs        #  11  background sniffing and attribution
 node _dev/test-inject.mjs       #   8  page hooks in a VM sandbox
@@ -69,7 +70,7 @@ node _dev/test-referer.mjs      #  23  referer decisions against a fake fetch
 node _dev/test-pause.mjs        #  82  pause, resume, snapshot saving on slow fixtures
 ```
 
-398 checks in total. The fixtures are real media generated with ffmpeg, plus one CMAF set taken from a live HLS feed to cover the split-audio path.
+404 checks in total. The fixtures are real media generated with ffmpeg, plus one CMAF set taken from a live HLS feed to cover the split-audio path.
 
 ## How it works
 
