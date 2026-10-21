@@ -846,7 +846,8 @@ function taskCard(task) {
     if (task.variantLabel) head.push(task.variantLabel);
     if (task.fileSize) head.push(fmtSize(task.fileSize));
     left.textContent = head.join(' · ');
-    left.appendChild(el('span', task.hasAudio ? 'track-ok' : 'track-none', t(task.hasAudio ? 'sub.audioYes' : 'sub.audioNo')));
+    // 只在确实读到音轨时才标一句：读不到不代表没有（moov 缺失、直播、合并前的中间态都可能）
+    if (task.hasAudio) left.appendChild(el('span', 'track-ok', t('sub.audioYes')));
     if (task.live) left.appendChild(el('span', null, ' · ' + t('sub.live')));
     if (task.partial && !task.live) {
       left.appendChild(el('span', 'track-part', t('sub.upTo', { n: Math.round(task.progress || 0) })));

@@ -436,6 +436,14 @@ console.log('\n[8] 任务卡：暂停 / 继续 / 保存');
   });
   ok(/截至 40%/.test(textOf(partial)), '完成后标出「截至 40%」', textOf(partial));
   ok(/已保存/.test(textOf(partial)), '右侧写已保存');
+  ok(/含音轨/.test(textOf(partial)), '读到音轨时标一句「含音轨」', textOf(partial));
+
+  // 读不到音轨 ≠ 没有声音：卡片上不能出现任何否定判断
+  const noFlag = render({
+    id: 'tk', title: '读不到音轨', status: 'done', progress: 100, fileSize: 4.8 * 1024 * 1024, outputExt: 'mp4'
+  });
+  ok(!/无音轨/.test(textOf(noFlag)), '读不到音轨时不写「无音轨」', textOf(noFlag));
+  ok(!/含音轨/.test(textOf(noFlag)), '读不到音轨时也不写「含音轨」', textOf(noFlag));
 }
 
 /* ---------- 9. 存进自定义文件夹的任务卡 ---------- */

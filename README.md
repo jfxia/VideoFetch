@@ -61,7 +61,7 @@ node _dev/serve.mjs 8898        # fixtures at http://127.0.0.1:8898/player.html
 node _dev/test-e2e.mjs          #  38  playlist parsing, remuxing, decryption
 node _dev/test-engine.mjs       #  62  full engine runs against a mocked chrome API
 node _dev/test-merge.mjs        #  21  fMP4 audio merging
-node _dev/test-popup.mjs        #  68  source list, quality picker, task buttons, English UI
+node _dev/test-popup.mjs        #  71  source list, quality picker, task buttons, English UI
 node _dev/test-settings.mjs     #  82  subfolder normalisation, settings, i18n, folder writing
 node _dev/test-sniff.mjs        #  11  background sniffing and attribution
 node _dev/test-inject.mjs       #   8  page hooks in a VM sandbox
@@ -69,7 +69,7 @@ node _dev/test-referer.mjs      #  23  referer decisions against a fake fetch
 node _dev/test-pause.mjs        #  82  pause, resume, snapshot saving on slow fixtures
 ```
 
-395 checks in total. Fixtures are real media generated with ffmpeg, plus one CMAF set pulled from a live HLS feed to lock down the split-audio path.
+398 checks in total. Fixtures are real media generated with ffmpeg, plus one CMAF set pulled from a live HLS feed to lock down the split-audio path.
 
 ## How it works
 

@@ -64,7 +64,7 @@ Edge / Chrome 扩展（Manifest V3）。嗅探网页里正在播放的视频源�
 
 纯音频源（Reddit 的 `CMAF_AUDIO_64.mp4` 这类，是视频拆出来的音轨）收进列表底部的「另有 N 个纯音频源」，收起时不计入视频源数量，展开后按钮是「下载音频」，单独下回来存成 `.m4a` 而不是假 mp4。
 
-合并过独立音轨的任务会标「含音轨」；只下到画面、声音没取到时会标「无音轨」，不会静默无声。
+合并过独立音轨的任务会标「含音轨」。反过来不标任何东西——读不到音轨不等于没有声音，moov 缺失、直播录制、合并完成前的中间态都会读不到，所以不写「无音轨」这种判断。
 
 ## 嗅探的四条通道
 
@@ -126,7 +126,7 @@ node _dev/serve.mjs 8898        # 夹具在 http://127.0.0.1:8898/player.html
 node _dev/test-e2e.mjs          #  38  解析 / 转封装 / 解密
 node _dev/test-engine.mjs       #  62  引擎全流程（mock chrome API）
 node _dev/test-merge.mjs        #  21  fMP4 音轨合并
-node _dev/test-popup.mjs        #  68  源列表、档位选择、任务卡按钮、英文界面
+node _dev/test-popup.mjs        #  71  源列表、档位选择、任务卡按钮、英文界面
 node _dev/test-settings.mjs     #  82  子目录规整、设置读写、词表对齐、写自定义文件夹
 node _dev/test-sniff.mjs        #  11  后台嗅探与归属
 node _dev/test-inject.mjs       #   8  页面 hook（vm 沙箱）
@@ -134,7 +134,7 @@ node _dev/test-referer.mjs      #  23  防盗链决策（假 fetch）
 node _dev/test-pause.mjs        #  82  暂停 / 继续 / 快照保存（慢速夹具）
 ```
 
-合计 395 项。夹具是 ffmpeg 生成的真实媒体，另有一组从线上 HLS 拉下来的 CMAF 分片，专门锁住「分离音轨合并」这条路径。
+合计 398 项。夹具是 ffmpeg 生成的真实媒体，另有一组从线上 HLS 拉下来的 CMAF 分片，专门锁住「分离音轨合并」这条路径。
 
 ## 已知限制
 
