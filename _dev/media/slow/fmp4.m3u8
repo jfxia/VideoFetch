@@ -1,0 +1,17 @@
+#EXTM3U
+#EXT-X-VERSION:7
+#EXT-X-TARGETDURATION:2
+#EXT-X-MEDIA-SEQUENCE:0
+#EXT-X-PLAYLIST-TYPE:VOD
+#EXT-X-MAP:URI="../fmp4/init.mp4"
+#EXTINF:2.000000,
+../fmp4/seg000.m4s?delay=300
+#EXTINF:2.000000,
+../fmp4/seg001.m4s?delay=300
+#EXTINF:2.000000,
+../fmp4/seg002.m4s?delay=300
+#EXTINF:2.000000,
+../fmp4/seg003.m4s?delay=300
+#EXTINF:2.000000,
+../fmp4/seg004.m4s?delay=300
+#EXT-X-ENDLIST

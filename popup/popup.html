@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>VideoFetch</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo"></span>
+      <span class="name">VideoFetch</span>
+    </div>
+    <div class="tools">
+      <button id="btn-refresh" class="icon-btn" data-i18n="top.refresh" data-i18n-title="top.refreshTitle" title="Refresh">Refresh</button>
+      <button id="btn-clear" class="icon-btn" data-i18n="top.clear" data-i18n-title="top.clearTitle" title="Clear">Clear</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-view="sources"><span data-i18n="nav.sources">Sources</span><span class="badge" id="badge-src">0</span></button>
+    <button class="tab" data-view="tasks"><span data-i18n="nav.tasks">Downloads</span><span class="badge" id="badge-task">0</span></button>
+  </nav>
+
+  <main class="view" id="view-sources">
+    <div class="hint" id="src-hint" data-i18n="src.scanning">Scanning this page for videos…</div>
+    <div class="list" id="src-list"></div>
+  </main>
+
+  <main class="view" id="view-tasks" hidden>
+    <div class="hint" id="task-hint" data-i18n="tasks.empty">No downloads yet</div>
+    <div class="list" id="task-list"></div>
+  </main>
+
+  <main class="view" id="view-diag" hidden>
+    <div class="diag-box" id="diag-box"></div>
+  </main>
+
+  <footer class="foot">
+    <span id="foot-info" data-i18n="foot.waiting">Waiting for media requests…</span>
+    <button id="btn-diag" class="link-btn" data-i18n="foot.diag">Diagnostics</button>
+    <button id="btn-settings" class="link-btn" data-i18n="foot.settings">Settings</button>
+  </footer>
+
+  <script src="../lib/i18n.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

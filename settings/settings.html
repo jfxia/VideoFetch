@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>VideoFetch Settings</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <div class="page">
+    <header class="head">
+      <span class="logo"></span>
+      <div class="head-text">
+        <h1 data-i18n="set.title">VideoFetch settings</h1>
+      </div>
+    </header>
+
+    <section class="card">
+      <h2 data-i18n="set.saveTitle">Save location</h2>
+
+      <div class="opt" id="opt-downloads">
+        <label class="opt-head">
+          <input type="radio" name="mode" value="downloads" id="mode-downloads">
+          <span class="opt-title" data-i18n="set.modeDownloads">Browser download folder</span>
+        </label>
+        <div class="opt-body">
+          <div class="row">
+            <span class="lab" data-i18n="set.subLabel">Subfolder</span>
+            <input id="sub" type="text" data-i18n-ph="set.subPh" spellcheck="false" autocomplete="off">
+            <button id="btn-open-folder" class="btn ghost sm" data-i18n="set.openFolder">Open download folder</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="opt" id="opt-dir">
+        <label class="opt-head">
+          <input type="radio" name="mode" value="dir" id="mode-dir">
+          <span class="opt-title" data-i18n="set.modeDir">Custom folder</span>
+        </label>
+        <div class="opt-body">
+          <div class="row">
+            <span class="lab" data-i18n="set.perms">Permission</span>
+            <span id="dir-name" class="dir-name">—</span>
+            <span id="perm" class="pill pill-none">—</span>
+          </div>
+          <div class="row">
+            <button id="btn-pick" class="btn sm" data-i18n="set.pick">Choose folder…</button>
+            <button id="btn-reauth" class="btn ghost sm" data-i18n="set.reauth" hidden>Authorize again</button>
+            <button id="btn-forget" class="btn ghost sm" data-i18n="set.clearDir" hidden>Forget folder</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="set.langTitle">Interface language</h2>
+      <div class="langs">
+        <label class="lang">
+          <input type="radio" name="lang" value="auto">
+          <span id="lang-auto">Follow browser</span>
+        </label>
+        <label class="lang">
+          <input type="radio" name="lang" value="en">
+          <span data-i18n="set.langEn">English</span>
+        </label>
+        <label class="lang">
+          <input type="radio" name="lang" value="zh">
+          <span data-i18n="set.langZh">简体中文</span>
+        </label>
+      </div>
+    </section>
+
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <script src="../lib/i18n.js"></script>
+  <script type="module" src="settings.js"></script>
+</body>
+</html>

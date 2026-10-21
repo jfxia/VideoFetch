@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { overflow: hidden; }
+    body {
+      width: var(--w);
+      height: var(--h);
+      position: relative;
+      font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: #fff;
+      background:
+        radial-gradient(120% 90% at 8% 0%, #2b5bd7 0%, rgba(43, 91, 215, 0) 58%),
+        linear-gradient(140deg, #101b34 0%, #16264a 46%, #0d1526 100%);
+    }
+    /* 右侧两层光斑，压住纯色渐变的呆板 */
+    body::before,
+    body::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(2px);
+    }
+    body::before {
+      right: calc(var(--w) * -0.06);
+      top: calc(var(--h) * -0.22);
+      width: calc(var(--h) * 1.15);
+      height: calc(var(--h) * 1.15);
+      background: radial-gradient(circle at 40% 40%, rgba(96, 148, 255, 0.42), rgba(96, 148, 255, 0) 62%);
+    }
+    body::after {
+      right: calc(var(--w) * 0.06);
+      bottom: calc(var(--h) * -0.34);
+      width: calc(var(--h) * 0.9);
+      height: calc(var(--h) * 0.9);
+      background: radial-gradient(circle at 50% 50%, rgba(37, 99, 235, 0.5), rgba(37, 99, 235, 0) 66%);
+    }
+    .wrap {
+      position: relative;
+      z-index: 2;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      gap: calc(var(--h) * 0.07);
+      padding: 0 calc(var(--h) * 0.11);
+    }
+    .logo {
+      flex: 0 0 auto;
+      width: calc(var(--h) * 0.3);
+      height: calc(var(--h) * 0.3);
+      border-radius: calc(var(--h) * 0.072);
+      background: #fff url('../icons/mark.png') center / 62% no-repeat;
+      box-shadow: 0 calc(var(--h) * 0.02) calc(var(--h) * 0.06) rgba(4, 12, 30, 0.42);
+    }
+    .text { min-width: 0; }
+    h1 {
+      font-size: var(--ts);
+      line-height: 1.05;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: calc(var(--h) * 0.028);
+    }
+    p {
+      font-size: var(--ss);
+      line-height: 1.45;
+      color: #c7d6f5;
+      max-width: calc(var(--w) * 0.6);
+    }
+    #shot {
+      position: absolute;
+      z-index: 3;
+      right: calc(var(--h) * 0.062);
+      top: calc(var(--h) * 0.145);
+      width: calc(var(--h) * 0.62);
+      height: auto;
+      border-radius: calc(var(--h) * 0.022);
+      box-shadow: 0 calc(var(--h) * 0.05) calc(var(--h) * 0.12) rgba(3, 10, 26, 0.55);
+      display: none;
+    }
+    .bar {
+      position: absolute;
+      left: calc(var(--h) * 0.11);
+      bottom: calc(var(--h) * 0.085);
+      width: calc(var(--h) * 0.5);
+      height: 3px;
+      border-radius: 3px;
+      background: linear-gradient(90deg, #4f8bff, rgba(79, 139, 255, 0));
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="logo"></div>
+    <div class="text">
+      <h1 id="t">VideoFetch</h1>
+      <p id="s"></p>
+    </div>
+  </div>
+  <img id="shot" alt="">
+  <div class="bar"></div>
+  <script>
+    const q = new URLSearchParams(location.search);
+    const d = document.documentElement.style;
+    d.setProperty('--w', q.get('w') + 'px');
+    d.setProperty('--h', q.get('h') + 'px');
+    d.setProperty('--ts', q.get('ts') + 'px');
+    d.setProperty('--ss', q.get('ss') + 'px');
+    document.getElementById('t').textContent = q.get('t') || 'VideoFetch';
+    document.getElementById('s').textContent = q.get('s') || '';
+    if (q.get('img')) {
+      const shot = document.getElementById('shot');
+      shot.src = q.get('img');
+      shot.style.display = 'block';
+    }
+  </script>
+</body>
+</html>

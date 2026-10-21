@@ -1,0 +1,282 @@
+:root {
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --line: #e6e8ec;
+  --text: #17191c;
+  --text-2: #6b7280;
+  --text-3: #9ca3af;
+  --brand: #2563eb;
+  --brand-soft: #eef3ff;
+  --ok: #0d9488;
+  --ok-soft: #e8f8f6;
+  --warn: #ea580c;
+  --warn-soft: #fff2e8;
+  --live: #e11d48;
+  --radius: 12px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  padding: 32px 20px 64px;
+}
+
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+/* ---------- 头部 ---------- */
+.head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.logo {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  background: url('../icons/mark.png') center / contain no-repeat;
+}
+
+h1 {
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: 0.2px;
+}
+
+/* ---------- 卡片 ---------- */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px 20px 20px;
+  margin-bottom: 16px;
+}
+
+.card h2 {
+  font-size: 15px;
+  font-weight: 650;
+  margin-bottom: 14px;
+}
+
+/* ---------- 单选项 ---------- */
+.opt {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  transition: 0.15s;
+}
+
+.opt.on {
+  border-color: #b9ccff;
+  background: #fbfcff;
+}
+
+.opt:last-child {
+  margin-bottom: 0;
+}
+
+.opt-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+}
+
+.opt-head input {
+  accent-color: var(--brand);
+  width: 15px;
+  height: 15px;
+}
+
+.opt-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.opt-body {
+  padding-left: 24px;
+  margin-top: 8px;
+}
+
+.opt.dim .opt-body {
+  opacity: 0.55;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.row:last-child {
+  margin-bottom: 0;
+}
+
+.lab {
+  color: var(--text-3);
+  font-size: 12.5px;
+  min-width: 56px;
+}
+
+input[type='text'] {
+  flex: 1 1 220px;
+  min-width: 140px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: #fff;
+}
+
+input[type='text']:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.dir-name {
+  flex: 1 1 200px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.pill {
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.pill-ok {
+  color: var(--ok);
+  background: var(--ok-soft);
+  border-color: #bfe8e2;
+}
+
+.pill-warn {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: #ffd9bf;
+}
+
+.pill-none {
+  color: var(--text-3);
+  background: #f3f4f6;
+  border-color: var(--line);
+}
+
+.btn {
+  border: 1px solid transparent;
+  background: var(--brand);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: 0.15s;
+}
+
+.btn:hover {
+  filter: brightness(1.06);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.btn.sm {
+  font-size: 12.5px;
+  padding: 5px 12px;
+}
+
+.btn.ghost {
+  background: #fff;
+  border-color: var(--line);
+  color: var(--text-2);
+}
+
+.btn.ghost:hover {
+  border-color: #c7cbd3;
+  color: var(--text);
+  filter: none;
+}
+
+/* ---------- 语言 ---------- */
+.langs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.lang {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 7px 14px 7px 11px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: 0.15s;
+}
+
+.lang:hover {
+  border-color: #c7cbd3;
+}
+
+.lang.on {
+  border-color: #b9ccff;
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.lang input {
+  accent-color: var(--brand);
+  width: 15px;
+  height: 15px;
+}
+
+/* ---------- toast ---------- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%) translateY(8px);
+  background: #1f2328;
+  color: #fff;
+  font-size: 13px;
+  padding: 9px 16px;
+  border-radius: 9px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  opacity: 0;
+  pointer-events: none;
+  transition: 0.18s;
+  max-width: 80vw;
+}
+
+.toast.on {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}

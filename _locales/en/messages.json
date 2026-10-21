@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "VideoFetch · Web Video Downloader",
+    "description": "Extension name shown in the browser"
+  },
+  "extDesc": {
+    "message": "Sniff out the video sources on a page and download them: HLS (m3u8), live HLS, streaming MP4 (fMP4) and blob players. Segments are fetched in parallel and merged into a single MP4.",
+    "description": "Extension description"
+  },
+  "actionTitle": {
+    "message": "VideoFetch · Video Downloader",
+    "description": "Toolbar button tooltip"
+  }
+}

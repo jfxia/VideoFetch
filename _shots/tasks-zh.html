@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>VideoFetch</title>
+  <link rel="stylesheet" href="../popup/popup.css">
+  <style>
+    html, body { width: 420px; }
+    body::-webkit-scrollbar { display: none; }
+      /* 截图时关掉过渡，否则颜色会停在动画起始帧 */
+    * { transition: none !important; animation: none !important; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo"></span>
+      <span class="name">VideoFetch</span>
+    </div>
+    <div class="tools">
+      <button id="btn-refresh" class="icon-btn" data-i18n="top.refresh" data-i18n-title="top.refreshTitle">刷新</button>
+      <button id="btn-clear" class="icon-btn" data-i18n="top.clear" data-i18n-title="top.clearTitle">清空</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-view="sources"><span data-i18n="nav.sources">视频源</span><span class="badge" id="badge-src">0</span></button>
+    <button class="tab" data-view="tasks"><span data-i18n="nav.tasks">下载任务</span><span class="badge" id="badge-task">0</span></button>
+  </nav>
+
+  <main class="view" id="view-sources">
+    <div class="hint" id="src-hint" data-i18n="src.scanning">正在嗅探本页视频…</div>
+    <div class="list" id="src-list"></div>
+  </main>
+
+  <main class="view" id="view-tasks" hidden>
+    <div class="hint" id="task-hint" data-i18n="tasks.empty">还没有下载任务</div>
+    <div class="list" id="task-list"></div>
+  </main>
+
+  <main class="view" id="view-diag" hidden>
+    <div class="diag-box" id="diag-box"></div>
+  </main>
+
+  <footer class="foot">
+    <span id="foot-info" data-i18n="foot.waiting">等待页面媒体请求…</span>
+    <button id="btn-diag" class="link-btn" data-i18n="foot.diag">诊断</button>
+    <button id="btn-settings" class="link-btn" data-i18n="foot.settings">设置</button>
+  </footer>
+
+  <script>
+    /* 截图专用：固定数据驱动真实 popup.js */
+    const LANG = 'zh';
+    const ITEMS = [];
+    const PROBE = {};
+    const TASKS = [
+      {
+        id: 't1', kind: 'hls', status: 'running',
+        title: 'How a CPU executes one instruction',
+        progress: 68, speed: 2360000, received: 33125440, total: 48723011,
+        variantLabel: '1080p', segmentsDone: 127, segmentsTotal: 186
+      },
+      {
+        id: 't2', kind: 'hls', status: 'paused',
+        title: 'Keynote 2026 — opening session',
+        progress: 41, received: 12435456, total: 30245567,
+        variantLabel: '720p', snapAt: Date.now(), snapSize: 12435456,
+        snapName: 'Keynote 2026 — opening session (41%).mp4', snapDownloadId: 21
+      }
+    ];
+
+    window.chrome = {
+      tabs: { query: async () => [{ id: 1, url: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ' }], create: async () => ({}) },
+      runtime: {
+        sendMessage: async (m) => {
+          if (m.type === 'list') return { ok: true, items: ITEMS, tasks: TASKS, diag: { hooked: true, hooks: [], global: {} } };
+          if (m.type === 'probe') return PROBE[m.url] || { ok: false, error: 'probe-failed' };
+          return { ok: true };
+        },
+        onMessage: { addListener() {} },
+        openOptionsPage() {},
+        getURL: (p) => p
+      },
+      storage: { local: { get: async () => ({ 'vf:ui': { lang: LANG } }), set: async () => {} } },
+      downloads: { show() {}, showDefaultFolder() {} }
+    };
+  </script>
+  <script src="../lib/i18n.js"></script>
+  <script src="../popup/popup.js"></script>
+  <script>
+    setTimeout(() => { try { showView('tasks'); } catch (e) {} }, 800);
+  </script>
+</body>
+</html>

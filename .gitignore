@@ -1,0 +1,21 @@
+# build output
+/dist/
+*.zip
+
+# test output
+_dev/*.mp4
+_dev/*.m4a
+_dev/*.png
+_dev/media/raw/
+_shots/raw/
+_shots/out/
+
+# editor / OS
+.DS_Store
+Thumbs.db
+*.log
+
+# local agent notes
+.workbuddy/
+
+node_modules/

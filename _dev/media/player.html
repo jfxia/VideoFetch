@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VideoFetch 自测页</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 28px 24px 60px;
+      font: 14px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #f6f7f9; color: #17191c;
+    }
+    .wrap { max-width: 860px; margin: 0 auto; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    .lead { color: #6b7280; font-size: 13px; margin: 0 0 20px; }
+    .lead b { color: #2563eb; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+    button {
+      font: inherit; font-size: 13px; padding: 7px 14px; cursor: pointer;
+      border: 1px solid #e0e3e9; background: #fff; color: #374151; border-radius: 8px;
+      transition: .15s;
+    }
+    button:hover { border-color: #b9c0cc; color: #111; }
+    button.on { background: #2563eb; border-color: #2563eb; color: #fff; }
+    video {
+      width: 100%; max-height: 460px; background: #0f1115; border-radius: 12px;
+      box-shadow: 0 6px 24px rgba(23,25,28,.12);
+    }
+    .now { margin-top: 10px; font-size: 12.5px; color: #6b7280; font-family: ui-monospace, Consolas, monospace; }
+    ol { font-size: 13px; color: #4b5563; padding-left: 20px; }
+    ol li { margin: 3px 0; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>VideoFetch 自测页</h1>
+    <p class="lead">点按钮播放视频 → 点浏览器工具栏的 <b>VideoFetch</b> 图标 → 列表里应出现对应源 → 点「下载」。</p>
+
+    <div class="row">
+      <button data-src="file.mp4" data-type="file">直链 MP4</button>
+      <button data-src="ts/index.m3u8" data-type="hls">HLS · TS 分片</button>
+      <button data-src="fmp4/index.m3u8" data-type="hls">HLS · fMP4 分片</button>
+      <button data-src="enc/index.m3u8" data-type="hls">HLS · AES-128 加密</button>
+      <button data-src="master.m3u8" data-type="hls">HLS · 多清晰度</button>
+      <button data-src="ts/live.m3u8" data-type="hls">HLS · 直播（模拟）</button>
+    </div>
+
+    <video id="v" controls playsinline></video>
+    <div class="now" id="now">当前未加载</div>
+
+    <ol>
+      <li>「直链 MP4」验证 Range 多线程下载。</li>
+      <li>HLS 系列由 hls.js 通过 MSE 播放，<code>video.src</code> 是 <code>blob:</code>，用于验证 blob/MSE 嗅探与录制。</li>
+      <li>「多清晰度」应出现分辨率下拉框（1280x720 / 640x360×2）。</li>
+      <li>「直播」没有 <code>#EXT-X-ENDLIST</code>，面板里应标为「直播」，点下载后需手动「停止并保存」。</li>
+      <li>AES-128 那组的分片是加密的，扩展应自动下载密钥解密后再合并。</li>
+    </ol>
+  </div>
+
+  <script src="hls.light.min.js"></script>
+  <script>
+    var hls = null;
+    var v = document.getElementById('v');
+    var now = document.getElementById('now');
+
+    function play(src, type) {
+      if (hls) { hls.destroy(); hls = null; }
+      v.pause();
+      v.removeAttribute('src');
+      v.load();
+      now.textContent = '正在加载：' + src;
+
+      if (type === 'hls' && window.Hls && window.Hls.isSupported()) {
+        hls = new window.Hls({ enableWorker: true, lowLatencyMode: false });
+        hls.loadSource(src);
+        hls.attachMedia(v);
+        hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
+          v.play().catch(function () {});
+          now.textContent = 'blob/MSE 播放：' + src;
+        });
+        hls.on(window.Hls.Events.ERROR, function (_, d) {
+          if (d && d.fatal) now.textContent = '播放失败：' + d.type + ' / ' + d.details;
+        });
+      } else {
+        v.src = src;
+        v.play().catch(function () {});
+        now.textContent = '直链播放：' + src;
+      }
+
+      document.querySelectorAll('button').forEach(function (b) {
+        b.classList.toggle('on', b.dataset.src === src);
+      });
+    }
+
+    document.querySelectorAll('button').forEach(function (b) {
+      b.addEventListener('click', function () { play(b.dataset.src, b.dataset.type); });
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>VideoFetch</title>
+  <link rel="stylesheet" href="../popup/popup.css">
+  <style>
+    html, body { width: 420px; }
+    /* 截图用：去掉滚动条痕迹 */
+    body::-webkit-scrollbar { display: none; }
+      /* 截图时关掉过渡，否则颜色会停在动画起始帧 */
+    * { transition: none !important; animation: none !important; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo"></span>
+      <span class="name">VideoFetch</span>
+    </div>
+    <div class="tools">
+      <button id="btn-refresh" class="icon-btn" data-i18n="top.refresh" data-i18n-title="top.refreshTitle">Refresh</button>
+      <button id="btn-clear" class="icon-btn" data-i18n="top.clear" data-i18n-title="top.clearTitle">Clear</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-view="sources"><span data-i18n="nav.sources">Sources</span><span class="badge" id="badge-src">0</span></button>
+    <button class="tab" data-view="tasks"><span data-i18n="nav.tasks">Downloads</span><span class="badge" id="badge-task">0</span></button>
+  </nav>
+
+  <main class="view" id="view-sources">
+    <div class="hint" id="src-hint" data-i18n="src.scanning">Scanning this page for videos…</div>
+    <div class="list" id="src-list"></div>
+  </main>
+
+  <main class="view" id="view-tasks" hidden>
+    <div class="hint" id="task-hint" data-i18n="tasks.empty">No downloads yet</div>
+    <div class="list" id="task-list"></div>
+  </main>
+
+  <main class="view" id="view-diag" hidden>
+    <div class="diag-box" id="diag-box"></div>
+  </main>
+
+  <footer class="foot">
+    <span id="foot-info" data-i18n="foot.waiting">Waiting for media requests…</span>
+    <button id="btn-diag" class="link-btn" data-i18n="foot.diag">Diagnostics</button>
+    <button id="btn-settings" class="link-btn" data-i18n="foot.settings">Settings</button>
+  </footer>
+
+  <script>
+    /* 截图专用：把后台换成固定数据，界面仍由 popup.js 真实渲染 */
+    const LANG = 'en';
+    const ITEMS = [
+      {
+        type: 'hls',
+        url: 'https://rr3---sn-8xgn5uxa.googlevideo.com/videoplayback/8f2c9d1a4b/playlist/index.m3u8',
+        mime: 'application/vnd.apple.mpegurl',
+        title: 'How a CPU executes one instruction',
+        pageUrl: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
+        frameId: 0,
+        ts: 100
+      },
+      {
+        type: 'file',
+        url: 'https://cdn.videofetch-demo.net/clips/3e7b91c2aa/1080p.mp4',
+        mime: 'video/mp4',
+        size: 48723011,
+        title: 'Weekend ride around the lake',
+        pageUrl: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
+        frameId: 0,
+        ts: 99
+      },
+      {
+        type: 'hls',
+        url: 'https://stream.videofetch-demo.net/live/event/2f61a0c9de/master.m3u8',
+        mime: 'application/vnd.apple.mpegurl',
+        title: 'Keynote 2026 — opening session',
+        pageUrl: 'https://www.youtube.com/watch?v=live2026',
+        frameId: 0,
+        ts: 90
+      },
+      {
+        type: 'file',
+        url: 'https://cdn.videofetch-demo.net/clips/7a1d3f91cc/CMAF_AUDIO_128.mp4',
+        mime: 'video/mp4',
+        title: 'CMAF_AUDIO_128.mp4',
+        pageUrl: 'https://www.reddit.com/r/explainlikeimfive/',
+        frameId: 0,
+        ts: 80
+      },
+      {
+        type: 'file',
+        url: 'https://cdn.videofetch-demo.net/clips/7a1d3f91cc/CMAF_AUDIO_64.mp4',
+        mime: 'video/mp4',
+        title: 'CMAF_AUDIO_64.mp4',
+        pageUrl: 'https://www.reddit.com/r/explainlikeimfive/',
+        frameId: 0,
+        ts: 79
+      }
+    ];
+
+    const PROBE = {
+      'https://rr3---sn-8xgn5uxa.googlevideo.com/videoplayback/8f2c9d1a4b/playlist/index.m3u8': {
+        ok: true, live: false, type: 'master', duration: 742,
+        variants: [
+          { index: 0, resolution: { width: 1920, height: 1080 }, codecs: 'avc1.640028', bandwidth: 4500000, uri: 'v0/index.m3u8' },
+          { index: 1, resolution: { width: 1280, height: 720 }, codecs: 'avc1.4d401f', bandwidth: 2200000, uri: 'v1/index.m3u8' },
+          { index: 2, resolution: { width: 854, height: 480 }, codecs: 'avc1.4d401e', bandwidth: 1100000, uri: 'v2/index.m3u8' }
+        ]
+      },
+      'https://stream.videofetch-demo.net/live/event/2f61a0c9de/master.m3u8': { ok: true, live: true, type: 'media' }
+    };
+
+    const TASKS = [
+      { id: 't1', kind: 'hls', status: 'done', title: 'Old town walkthrough', progress: 100, variantLabel: '1080p', fileSize: 48723011, hasAudio: true, downloadId: 12 },
+      { id: 't2', kind: 'hls', status: 'done', title: 'Weekend ride around the lake', progress: 100, variantLabel: '720p', fileSize: 22401997, hasAudio: true, downloadId: 13 }
+    ];
+
+    window.chrome = {
+      tabs: { query: async () => [{ id: 1, url: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ' }], create: async () => ({}) },
+      runtime: {
+        sendMessage: async (m) => {
+          if (m.type === 'list') return { ok: true, items: ITEMS, tasks: TASKS, diag: { hooked: true, hooks: [{ frameId: 0, url: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ' }], global: { seen: 128, media: 5 }, ignored: [] } };
+          if (m.type === 'probe') return PROBE[m.url] || { ok: false, error: 'probe-failed' };
+          if (m.type === 'blob-info') return { ok: false };
+          return { ok: true };
+        },
+        onMessage: { addListener() {} },
+        openOptionsPage() {},
+        getURL: (p) => p
+      },
+      storage: { local: { get: async () => ({ 'vf:ui': { lang: LANG } }), set: async () => {} } },
+      downloads: { show() {}, showDefaultFolder() {}, showDefaultFolder() {} }
+    };
+  </script>
+  <script src="../lib/i18n.js"></script>
+  <script src="../popup/popup.js"></script>
+</body>
+</html>
