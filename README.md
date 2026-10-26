@@ -23,17 +23,11 @@ A Manifest V3 extension for Edge and Chrome. It downloads what a page is playing
 
 ## Install
 
-### Loading the unpacked build
-
 1. Run `python _dev/build.py`, or unpack a release archive
 2. Open `edge://extensions/` (Chrome: `chrome://extensions/`)
 3. Enable **Developer mode**
 4. Choose **Load unpacked** and select `dist/`
 5. Reload the page to be downloaded. Content scripts run only at page load
-
-### Store
-
-The listing is prepared but not published yet. The link will be added here once it is available.
 
 ## Usage
 
@@ -103,10 +97,6 @@ Blob sources are captured at `SourceBuffer`. Media data reaches the player throu
 - **A custom folder is chosen in settings**: the picker needs a user gesture and cannot be opened from the popup. If the permission lapses, downloads fall back to the browser folder and the task reports where the file was actually saved.
 - **Saving produces a snapshot, not a completed file**: each save copies the progress so far and occupies temporary space in OPFS.
 - **Ranged resume depends on the server**: files that ignore `Range` restart from zero, and an MP4 with `moov` at the end cannot play after truncation.
-
-## Screenshots
-
-The two images above are in `docs/`, captured from the real popup pages at 2× by `_dev/make-store-art.py` and composed onto a 1280×800 canvas. The same script writes the Edge Add-ons listing material into `store/` (icon, promotional tiles, listing copy, privacy policy), which stays on the machine and is not committed.
 
 ## Licence
 
