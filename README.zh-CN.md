@@ -126,7 +126,7 @@ node _dev/serve.mjs 8898        # 夹具在 http://127.0.0.1:8898/player.html
 
 node _dev/test-e2e.mjs          #  38  解析 / 转封装 / 解密
 node _dev/test-engine.mjs       #  62  引擎全流程（mock chrome API）
-node _dev/test-merge.mjs        #  21  fMP4 音轨合并
+node _dev/test-merge.mjs        #  31  fMP4 音轨合并
 node _dev/test-popup.mjs        #  77  源列表、档位选择、任务卡按钮、英文界面
 node _dev/test-settings.mjs     #  82  子目录规整、设置读写、词表对齐、写自定义文件夹
 node _dev/test-sniff.mjs        #  11  后台嗅探与归属
@@ -135,7 +135,7 @@ node _dev/test-referer.mjs      #  23  防盗链决策（假 fetch）
 node _dev/test-pause.mjs        #  82  暂停 / 继续 / 快照保存（慢速夹具）
 ```
 
-合计 404 项。夹具为 ffmpeg 生成的真实媒体，另有一组取自线上 HLS 的 CMAF 分片，用于覆盖「分离音轨合并」这条路径。
+合计 414 项。夹具为 ffmpeg 生成的真实媒体，另有一组取自线上 HLS 的 CMAF 分片，用于覆盖「分离音轨合并」这条路径。
 
 ## 已知限制
 

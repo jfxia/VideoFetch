@@ -6,10 +6,12 @@
  *   3. 分片交错后输出文件含视频+音频两条轨，且可完整解码
  */
 import { readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { parsePlaylist } from '../lib/m3u8.js';
 import { Assembler } from '../lib/remux.js';
-import { splitFmp4, mergeInits, renumberTracks, patchSeq, fragmentStartSec } from '../lib/mp4merge.js';
+import { splitFmp4, mergeInits, renumberTracks, patchSeq, fragmentStartSec, tidyFragments, parseBoxes } from '../lib/mp4merge.js';
+import { collectTrackScales } from '../lib/mp4time.js';
 
 const BASE = 'http://127.0.0.1:8898/';
 let pass = 0;
@@ -160,6 +162,100 @@ const audioDur = parseFloat(
   probe(['-select_streams', 'a:0', '-show_entries', 'stream=duration', '-of', 'csv=p=0']) || '0'
 );
 ok(audioDur > 8.5, '音频轨时长 ' + audioDur.toFixed(2) + 's');
+
+console.log('\n[5] 录制路线：播放器重复 append 的分片');
+
+const cat = (...arrs) => {
+  let n = 0;
+  for (const a of arrs) n += a.length;
+  const out = new Uint8Array(n);
+  let o = 0;
+  for (const a of arrs) {
+    out.set(a, o);
+    o += a.length;
+  }
+  return out;
+};
+
+// 4 秒、每秒一片的音视频混流：拿它模拟播放器 seek 回看时的 append 序列
+execFileSync('ffmpeg', [
+  '-y', '-v', 'error',
+  '-f', 'lavfi', '-i', 'testsrc=size=320x180:rate=25:duration=4',
+  '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4',
+  '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '25', '-pix_fmt', 'yuv420p',
+  '-c:a', 'aac', '-b:a', '96k',
+  '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+  '-frag_duration', '1000000',
+  '-f', 'mp4', '_dev/dup-src.mp4'
+]);
+const dupSrc = new Uint8Array(readFileSync('_dev/dup-src.mp4'));
+const dup = splitFmp4(dupSrc);
+ok(dup.fragments.length === 4, '夹具 4 个分片', dup.fragments.length + '');
+
+// 先 0、2、1、3（乱序），再回头 1、2（重复）
+const order = [0, 2, 1, 3, 1, 2];
+const noisy = order.map((i) => dup.fragments[i]);
+
+const dsc = collectTrackScales(dup.init);
+const tidy = tidyFragments(dup.init, noisy);
+ok(tidy.fragments.length === 4, '整理后剩 4 段', tidy.fragments.length + '');
+ok(tidy.dropped === 2, '丢掉 2 段重复', tidy.dropped + '');
+const tidyTimes = tidy.fragments.map((f) => fragmentStartSec(f, dsc));
+ok(
+  tidyTimes.every((t, i) => i === 0 || t > tidyTimes[i - 1]),
+  '按 tfdt 排成时间顺序',
+  tidyTimes.map((t) => t.toFixed(2)).join(' ')
+);
+
+const dupLogs = [];
+const dupAsm = new Assembler((m) => dupLogs.push(m), null, 0);
+await dupAsm.push(cat(dup.init, ...noisy));
+const dupOut = cat(...dupAsm.drain(true));
+writeFileSync('_dev/dup-out.mp4', Buffer.from(dupOut));
+ok(dupAsm.stats.dups === 2, '装配器丢掉 2 段重复分片', dupAsm.stats.dups + '');
+
+const moofCount = (u8) => parseBoxes(u8).filter((b) => b.type === 'moof').length;
+ok(moofCount(dupOut) === 4, '输出里只有 4 个分片', moofCount(dupOut) + '');
+
+const dupDur = parseFloat(
+  execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', '_dev/dup-out.mp4'], {
+    encoding: 'utf8'
+  }).trim()
+);
+ok(dupDur > 3.8 && dupDur < 4.4, '时长仍是 4s（没被重复分片拉长）', dupDur.toFixed(2) + 's');
+
+let dupErr = '';
+try {
+  execFileSync('ffmpeg', ['-v', 'error', '-i', '_dev/dup-out.mp4', '-f', 'null', '-'], { stdio: 'pipe' });
+} catch (e) {
+  dupErr = String(e.stderr || e.message);
+}
+ok(!dupErr, '重复分片去掉后可完整解码' + (dupErr ? '：' + dupErr.slice(0, 160) : ''));
+
+// 独立音轨同样会被重复 append：整理掉之后，成片音频应与源逐字节等价
+const aRawDup = new Uint8Array(readFileSync('_dev/media/cmaf/CMAF_AUDIO_128.mp4'));
+const aPart = splitFmp4(aRawDup);
+const vRawDup = new Uint8Array(readFileSync('_dev/media/cmaf/CMAF_720.mp4'));
+const vPart = splitFmp4(vRawDup);
+
+const aLogs = [];
+const aAsm = new Assembler((m) => aLogs.push(m), null, 0);
+aAsm.setAudioTrack({
+  init: aPart.init,
+  fragments: [aPart.fragments[1], aPart.fragments[0], aPart.fragments[1], aPart.fragments[0]]
+});
+await aAsm.push(cat(vPart.init, vPart.fragments[0], vPart.fragments[1]));
+writeFileSync('_dev/dup-merged.mp4', Buffer.from(cat(...aAsm.drain(true))));
+ok(aLogs.some((m) => /音轨整理/.test(m)), '日志说明音轨被整理过', aLogs.filter((m) => /音轨整理/.test(m))[0] || '');
+
+const pcm = (file) =>
+  execFileSync('ffmpeg', ['-v', 'error', '-i', file, '-map', '0:a', '-f', 's16le', '-ac', '2', '-ar', '48000', '-'], {
+    maxBuffer: 1 << 26
+  });
+const md5 = (b) => createHash('md5').update(b).digest('hex');
+const srcPcm = md5(pcm('_dev/media/cmaf/CMAF_AUDIO_128.mp4'));
+const gotPcm = md5(pcm('_dev/dup-merged.mp4'));
+ok(srcPcm === gotPcm, '音频 PCM 与源文件完全一致', gotPcm.slice(0, 12));
 
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');
 process.exit(fail ? 1 : 0);
