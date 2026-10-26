@@ -8,15 +8,15 @@ A Manifest V3 extension for Edge and Chrome. It downloads what a page is playing
 
 ## Features
 
-- **Finding the source**: Open a page that is playing video and the popup lists what it finds. The qualities of one video sit in a single dropdown, highest first. Sites load video in different ways, so several places are watched at once. A site that closes one of them is usually still visible through another.
-- **One file out**: Segments are fetched eight at a time and assembled in playback order as they arrive, so the download finishes as one `.mp4` that plays as it is. No second step joins anything.
-- **Keeping the sound**: Plenty of sites keep picture and sound in two files. Both are fetched and put back on one timeline, so the result is not a silent video. Live streams are the exception, noted under Known limits.
+- **Finding the source**: Open the popup on a page that is playing video and it lists what that page is using. The qualities of one video are collected into a single dropdown, highest first. Sites load video in different ways, so several places are watched at once. A site that blocks one of them is usually still visible through another.
+- **One finished file**: Segments are fetched eight at a time and assembled in playback order as they arrive, so the download finishes as one `.mp4` that plays as it is, with nothing left to join.
+- **Keeping the audio track**: Many sites keep picture and sound in two files. Both are fetched and put back on one timeline, so the result is not a silent video. Live streams are the exception, noted under Known limits.
 - **Correcting a wrong label**: Some sites label a plain AAC track as HE-AAC. A decoder follows that label, looks for data the samples never carried, and the sound comes out dull. The label is rewritten while the file is written. The audio itself is not touched.
-- **Pause and resume**: Pause stops asking the server for more and leaves what has arrived in place. Resume carries on from there rather than starting over. When something playable is needed before the end, Save writes a copy of the current progress with the percentage in its name, and the task keeps running.
+- **Pause and resume**: Pause stops new requests to the server and leaves what has arrived in place. Resume continues from that point rather than starting over. To obtain a playable file before the end, Save writes a copy of the current progress with the percentage in its name, and the task keeps running.
 - **Opening the file**: A finished download, or a snapshot saved along the way, opens with the system default player from its task card. A file that has since been moved is found by opening the download list instead.
-- **Recording live**: A playlist with no end marker is treated as live. It is polled as it grows and written as it arrives, until Stop and save is pressed. Nothing else ends a live stream.
+- **Recording live**: A playlist with no end marker is treated as live. It is polled as it grows and written as it arrives, until Stop and save is pressed. A live stream has no natural end, so ending it is left to the user.
 - **Encryption and hotlink checks**: Segments behind AES-128 are decrypted locally before they are written. A CDN that answers only requests from its own pages receives the right referrer, and a one-byte request confirms the server accepts it before the download begins.
-- **Where files land**: `Downloads/VideoFetch/` by default, or any folder chosen on the settings page. A name already taken gets a number instead of replacing the old file.
+- **Save location**: `Downloads/VideoFetch/` by default, or any folder chosen on the settings page. A name already taken gets a number instead of replacing the old file.
 - **Interface language**: English by default, Chinese on a Chinese browser, and either one can be pinned in settings.
 
 <img src="docs/screenshot-2-tasks-zh.png" width="720" alt="Download tasks, one running and one paused with a saved snapshot">
