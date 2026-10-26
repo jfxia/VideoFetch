@@ -11,9 +11,8 @@
  * 用法：node _dev/fix-media.mjs <输入.mp4> [输出.mp4]
  */
 import { readFileSync, writeFileSync } from 'node:fs';
-
-const FREQ = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
-const AOT = { 1: 'AAC-Main', 2: 'AAC-LC', 3: 'AAC-SSR', 4: 'AAC-LTP', 5: 'SBR(HE-AAC)', 29: 'PS(HE-AACv2)' };
+// 与扩展共用同一份实现，避免两处逻辑各改各的
+import { normalizeAudioConfig } from '../lib/mp4time.js';
 
 const u32 = (b, p) => ((b[p] << 24) | (b[p + 1] << 16) | (b[p + 2] << 8) | b[p + 3]) >>> 0;
 const u64 = (b, p) => u32(b, p) * 4294967296 + u32(b, p + 4);
@@ -58,84 +57,6 @@ function find(b, box, t, depth = 0) {
     }
   }
   return out;
-}
-
-/* ---------------- 一、修 ASC ---------------- */
-
-function readAsc(asc) {
-  let bit = 0;
-  const rd = (n) => {
-    let v = 0;
-    for (let k = 0; k < n; k++) {
-      const byte = asc[bit >> 3] || 0;
-      v = (v << 1) | ((byte >> (7 - (bit & 7))) & 1);
-      bit++;
-    }
-    return v;
-  };
-  const aot = rd(5);
-  const freqIdx = rd(4);
-  const channels = rd(4);
-  const info = { aot, freqIdx, channels, rate: FREQ[freqIdx] || 0 };
-  if (aot === 5 || aot === 29) {
-    info.extIdx = rd(4);
-    info.extRate = FREQ[info.extIdx] || 0;
-    info.coreAot = rd(5);
-  }
-  return info;
-}
-
-/** 把 AOT 5/29 但扩展采样率等于核心采样率的无效标注，改写成真实的编码类型 */
-function normalizeAsc(b) {
-  const notes = [];
-  for (const trak of find(b, { start: 0, header: 0, end: b.length }, 'trak')) {
-    const hdlr = find(b, trak, 'hdlr')[0];
-    if (!hdlr) continue;
-    const kind = String.fromCharCode(b[hdlr.start + hdlr.header + 8], b[hdlr.start + hdlr.header + 9], b[hdlr.start + hdlr.header + 10], b[hdlr.start + hdlr.header + 11]);
-    if (kind !== 'soun') continue;
-
-    const esds = find(b, trak, 'esds')[0];
-    if (!esds) continue;
-
-    let ascAt = -1;
-    let ascLen = 0;
-    for (let i = esds.start + esds.header + 4; i < esds.end - 2; i++) {
-      if (b[i] !== 0x05) continue;
-      let q = i + 1;
-      let len = 0;
-      while (b[q] & 0x80) { len = (len << 7) | (b[q] & 0x7f); q++; }
-      len = (len << 7) | b[q]; q++;
-      if (len > 0 && q + len <= esds.end) { ascAt = q; ascLen = len; break; }
-    }
-    if (ascAt < 0) continue;
-
-    const info = readAsc(b.subarray(ascAt, ascAt + ascLen));
-    const label = `${AOT[info.aot] || 'AOT ' + info.aot} 核心 ${info.rate} Hz` +
-      (info.extRate ? ` → ${info.extRate} Hz` : '') + ` ${info.channels} ch`;
-    if (!(info.aot === 5 || info.aot === 29) || info.extRate !== info.rate) {
-      notes.push(`音频 ASC 保持原样：${label}`);
-      continue;
-    }
-
-    // SBR 声称把采样率翻倍却填了同一个值 = 没有真实的高频扩展
-    const core = info.coreAot === 5 || info.coreAot === 29 ? 2 : (info.coreAot || 2);
-    let bits = core.toString(2).padStart(5, '0') +
-      info.freqIdx.toString(2).padStart(4, '0') +
-      info.channels.toString(2).padStart(4, '0') + '000';
-    // 4 字节 ASC 补上「显式声明没有 SBR」的同步扩展（0x2b7 AOT=5 sbrPresent=0），
-    // 长度不变才不用改 esds/stsd 的尺寸字段
-    if (ascLen === 4) bits += '0101011011100101';
-    const bytes = [];
-    for (let i = 0; i < ascLen; i++) {
-      const chunk = bits.slice(i * 8, i * 8 + 8);
-      bytes.push(chunk ? parseInt(chunk.padEnd(8, '0'), 2) : 0);
-    }
-    const before = [...b.subarray(ascAt, ascAt + ascLen)].map((v) => v.toString(16).padStart(2, '0')).join(' ');
-    b.set(bytes, ascAt);
-    const after = bytes.map((v) => v.toString(16).padStart(2, '0')).join(' ');
-    notes.push(`音频 ASC 改写：${label}  ${before} → ${after}`);
-  }
-  return notes;
 }
 
 /* ---------------- 二、修时长 ---------------- */
@@ -252,7 +173,7 @@ const buf = readFileSync(src);
 const b = new Uint8Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
 
 console.log('输入:', src);
-for (const note of normalizeAsc(b)) console.log('  ' + note);
+for (const note of normalizeAudioConfig(b)) console.log('  ' + note);
 for (const note of fixDuration(b)) console.log('  ' + note);
 
 writeFileSync(dst, b);

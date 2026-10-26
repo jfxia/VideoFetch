@@ -10,7 +10,7 @@ A Manifest V3 extension for Edge and Chrome. It downloads the media a page is al
 
 - **Source discovery**: four channels feed the list: response headers read through `webRequest`, hooks on the page's `fetch` and `XHR`, manifests carried in JSON API responses, and Resource Timing as a last resort. A site that hides its player from one channel usually appears in another.
 - **Parallel download**: HLS segments are fetched eight at a time and delivered in playback order. TS segments are remuxed to fMP4 with mux.js; fMP4 segments are concatenated directly. Plain files are fetched in 4 MB chunks when the server accepts `Range`.
-- **Audio**: renditions declared through `EXT-X-MEDIA` are downloaded separately and merged back onto the video timeline. Where a site serves video and audio as two files, the paired HLS playlist is fetched to obtain the audio. MSE players that append to two `SourceBuffer`s are recorded on both tracks and joined afterwards.
+- **Audio**: renditions declared through `EXT-X-MEDIA` are downloaded separately and merged back onto the video timeline. Where a site serves video and audio as two files, the paired HLS playlist is fetched to obtain the audio. MSE players that append to two `SourceBuffer`s are recorded on both tracks and joined afterwards. Feeds that label an AAC stream as HE-AAC while giving the extension rate as equal to the core rate are corrected to the codec the bitstream actually carries: the samples hold no SBR data, and a player following the label would decode them on a path the data does not support.
 - **Pause and resume**: pausing stops new requests immediately and aborts those in flight after 400 ms; downloaded segments and the cursor are retained. Resuming continues from the cursor. *Save* writes the progress so far to a second file (`clip (40%).mp4`) and leaves the task active.
 - **Opening the result**: a finished download or a saved snapshot opens with the system default program straight from its task card. If the file has since been moved, the button falls back to locating it in the download list.
 - **Live streams**: a playlist without `#EXT-X-ENDLIST` is treated as live and polled at its target duration. Recording ends when the user stops it.
@@ -61,7 +61,7 @@ node _dev/serve.mjs 8898        # fixtures at http://127.0.0.1:8898/player.html
 
 node _dev/test-e2e.mjs          #  38  playlist parsing, remuxing, decryption
 node _dev/test-engine.mjs       #  62  full engine runs against a mocked chrome API
-node _dev/test-merge.mjs        #  31  fMP4 audio merging
+node _dev/test-merge.mjs        #  41  fMP4 audio merging
 node _dev/test-popup.mjs        #  77  source list, quality picker, task buttons, English UI
 node _dev/test-settings.mjs     #  82  subfolder normalisation, settings, i18n, folder writing
 node _dev/test-sniff.mjs        #  11  background sniffing and attribution
@@ -70,7 +70,7 @@ node _dev/test-referer.mjs      #  23  referer decisions against a fake fetch
 node _dev/test-pause.mjs        #  82  pause, resume, snapshot saving on slow fixtures
 ```
 
-414 checks in total. The fixtures are real media generated with ffmpeg, plus one CMAF set taken from a live HLS feed to cover the split-audio path.
+424 checks in total. The fixtures are real media generated with ffmpeg, plus one CMAF set taken from a live HLS feed to cover the split-audio path.
 
 ## How it works
 

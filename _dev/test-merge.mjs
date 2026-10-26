@@ -11,7 +11,7 @@ import { execFileSync } from 'node:child_process';
 import { parsePlaylist } from '../lib/m3u8.js';
 import { Assembler } from '../lib/remux.js';
 import { splitFmp4, mergeInits, renumberTracks, patchSeq, fragmentStartSec, tidyFragments, parseBoxes } from '../lib/mp4merge.js';
-import { collectTrackScales } from '../lib/mp4time.js';
+import { collectTrackScales, normalizeAudioConfig } from '../lib/mp4time.js';
 
 const BASE = 'http://127.0.0.1:8898/';
 let pass = 0;
@@ -256,6 +256,75 @@ const md5 = (b) => createHash('md5').update(b).digest('hex');
 const srcPcm = md5(pcm('_dev/media/cmaf/CMAF_AUDIO_128.mp4'));
 const gotPcm = md5(pcm('_dev/dup-merged.mp4'));
 ok(srcPcm === gotPcm, '音频 PCM 与源文件完全一致', gotPcm.slice(0, 12));
+
+console.log('\n[6] 音频编码标注：声称 HE-AAC 但 SBR 没有翻倍');
+
+// ffmpeg 写的标准 ASC：AAC-LC 48kHz 2ch + 「显式无 SBR」同步扩展
+const ASC_LC = [0x11, 0x90, 0x56, 0xe5, 0x00];
+// 同一路码流却标成 AOT 5（HE-AAC），扩展采样率又填回 48kHz —— 无效标注
+const ASC_BAD = [0x29, 0x91, 0x88, 0x00, 0x00];
+
+/** 把夹具 init 里的 ASC 换成指定字节，返回副本与位置 */
+const initWith = (bytes) => {
+  const copy = Uint8Array.from(aPart.init);
+  for (let i = 0; i + ASC_LC.length <= copy.length; i++) {
+    if (ASC_LC.every((v, k) => copy[i + k] === v)) {
+      copy.set(bytes, i);
+      return { init: copy, at: i };
+    }
+  }
+  throw new Error('夹具 init 里找不到预期的 ASC');
+};
+
+const bad = initWith(ASC_BAD);
+ok(
+  ASC_BAD.every((v, k) => bad.init[bad.at + k] === v),
+  '构造出一份标错编码的 init',
+  ASC_BAD.map((v) => v.toString(16)).join(' ')
+);
+
+const notes = normalizeAudioConfig(bad.init);
+ok(notes.length === 1, '识别出无效标注并改写', notes[0] || '无输出');
+ok(
+  ASC_LC.every((v, k) => bad.init[bad.at + k] === v),
+  'ASC 改回真实的 AAC-LC',
+  Array.from(bad.init.subarray(bad.at, bad.at + ASC_LC.length), (v) => v.toString(16)).join(' ')
+);
+ok(
+  Buffer.compare(Buffer.from(bad.init), Buffer.from(aPart.init)) === 0,
+  '除 ASC 外一个字节都没动'
+);
+ok(normalizeAudioConfig(bad.init).length === 0, '重复调用不再改动（幂等）');
+ok(normalizeAudioConfig(Uint8Array.from(aPart.init)).length === 0, '正常 AAC-LC 的 init 原样保留');
+
+// 端到端：标错的音轨走一遍合并，产出文件里的标注应当已经正确
+const ascAsm = new Assembler(() => {}, null, 0);
+ascAsm.setAudioTrack({ init: initWith(ASC_BAD).init, fragments: [aPart.fragments[0], aPart.fragments[1]] });
+await ascAsm.push(cat(vPart.init, vPart.fragments[0], vPart.fragments[1]));
+const ascOut = cat(...ascAsm.drain(true));
+writeFileSync('_dev/asc-out.mp4', Buffer.from(ascOut));
+
+let stillBad = false;
+for (let i = 0; i + ASC_BAD.length <= ascOut.length; i++) {
+  if (ASC_BAD.every((v, k) => ascOut[i + k] === v)) stillBad = true;
+}
+ok(!stillBad, '合并产物里没有残留的错误标注');
+ok(ascAsm.audioNotes.some((n) => /编码标注/.test(n)), '装配记录里留下说明', ascAsm.audioNotes[0] || '');
+
+const ascProfile = execFileSync(
+  'ffprobe',
+  ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=profile', '-of', 'csv=p=0', '_dev/asc-out.mp4'],
+  { encoding: 'utf8' }
+).trim();
+ok(/LC/i.test(ascProfile), 'ffprobe 读到的音频 profile 是 AAC-LC', ascProfile);
+
+let ascErr = '';
+try {
+  execFileSync('ffmpeg', ['-v', 'error', '-i', '_dev/asc-out.mp4', '-f', 'null', '-'], { stdio: 'pipe' });
+} catch (e) {
+  ascErr = String(e.stderr || e.message);
+}
+ok(!ascErr, '改写后仍可完整解码' + (ascErr ? '：' + ascErr.slice(0, 160) : ''));
 
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');
 process.exit(fail ? 1 : 0);
