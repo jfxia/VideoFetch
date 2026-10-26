@@ -37,14 +37,31 @@ function audioConfig(esds) {
       rate = ((b1 & 0x7f) << 17) | (esds[p + 2] << 9) | (esds[p + 3] << 1) | (esds[p + 4] >> 7);
     }
     const channels = (b1 >> 3) & 0x0f;
-    // 显式 SBR 信令：AOT 为 5/29
-    return { aot, label: AOT[aot] || ('AOT ' + aot), rate, channels, freqIndex };
+    // AOT 5/29 是显式 SBR 信令：紧随其后的 4 bit 才是输出采样率，
+    // 前面那个 rate 只是核心采样率（SBR 之前），别拿它判断音质
+    let outRate = 0;
+    if ((aot === 5 || aot === 29) && p + 2 < esds.length) {
+      const extIdx = ((b1 & 0x07) << 1) | (esds[p + 2] >> 7);
+      if (extIdx !== 15) outRate = FREQ[extIdx] || 0;
+    }
+    return { aot, label: AOT[aot] || ('AOT ' + aot), rate, outRate, channels, freqIndex };
+  }
+  return null;
+}
+
+/** esds 的 DecoderConfigDescriptor 里带着编码器声明的码率 */
+function esdsBitrate(esds) {
+  for (let i = 0; i + 13 < esds.length; i++) {
+    if (esds[i] !== 0x04) continue;
+    const p = i + 2;
+    if (p + 13 > esds.length) continue;
+    return { max: readU32(esds, p + 5), avg: readU32(esds, p + 9) };
   }
   return null;
 }
 
 function trackInfo(u8, trak) {
-  const out = { id: 0, handler: '', timescale: 0, codec: '', w: 0, h: 0, asc: null };
+  const out = { id: 0, handler: '', timescale: 0, codec: '', w: 0, h: 0, asc: null, esds: null };
   for (const t of parseBoxes(u8, trak.start + trak.header, trak.end)) {
     const b = t.start + t.header;
     if (t.type === 'tkhd') {
@@ -72,7 +89,11 @@ function trackInfo(u8, trak) {
               out.codec = first.type;
               if (first.type === 'mp4a' || first.type === 'enca') {
                 for (const e of parseBoxes(u8, first.start + first.header + 28, first.end)) {
-                  if (e.type === 'esds') out.asc = audioConfig(u8.subarray(e.start + e.header + 4, e.end));
+                  if (e.type === 'esds') {
+                    const payload = u8.subarray(e.start + e.header + 4, e.end);
+                    out.asc = audioConfig(payload);
+                    out.esds = esdsBitrate(payload);
+                  }
                 }
               }
             }
@@ -84,11 +105,25 @@ function trackInfo(u8, trak) {
   return out;
 }
 
-/** 遍历 moof，收集每条轨道每个分片的 tfdt 与样本数 */
+/** 遍历 moof，收集每条轨道每个分片的 tfdt、样本数与 mdat 字节数 */
 function scanFragments(u8) {
-  const per = new Map();  // trackId -> [{tfdt, samples, dur}]
-  for (const b of parseBoxes(u8)) {
+  const per = new Map();  // trackId -> [{tfdt, samples, dur, bytes}]
+  const top = parseBoxes(u8);
+  for (let i = 0; i < top.length; i++) {
+    const b = top[i];
     if (b.type !== 'moof') continue;
+
+    // 分片后面紧跟的 mdat 才是这一段的数据量
+    let mdatBytes = 0;
+    for (let j = i + 1; j < top.length; j++) {
+      if (top[j].type === 'mdat') {
+        mdatBytes = top[j].end - top[j].start - top[j].header;
+        break;
+      }
+      if (top[j].type === 'moof') break;
+    }
+
+    const rows = [];
     for (const traf of parseBoxes(u8, b.start + b.header, b.end)) {
       if (traf.type !== 'traf') continue;
       let id = 0;
@@ -111,16 +146,45 @@ function scanFragments(u8) {
         }
       }
       if (!id) continue;
-      if (!per.has(id)) per.set(id, []);
-      per.get(id).push({ tfdt, samples, dur: defDur });
+      rows.push({ id, tfdt, samples, dur: defDur });
+    }
+
+    // 一个 moof 里有多条 traf 时分不清各自的字节，只统计单轨分片
+    for (const r of rows) {
+      if (!per.has(r.id)) per.set(r.id, []);
+      per.get(r.id).push({ tfdt: r.tfdt, samples: r.samples, dur: r.dur, bytes: rows.length === 1 ? mdatBytes : 0 });
     }
   }
   return per;
 }
 
+/** 相邻分片之间算出来的码率（kbps），按 tfdt 排序后取差值 */
+function bitratePoints(list, ts) {
+  if (!list.length || !ts) return [];
+  const sorted = [...list].filter((f) => f.tfdt != null && f.bytes).sort((a, b) => a.tfdt - b.tfdt);
+  if (!sorted.length) return [];
+
+  // 每段时长用相邻 tfdt 的差值；末段没有下一段，沿用它前面那段的
+  const spans = sorted.map((f, i) => (sorted[i + 1] ? (sorted[i + 1].tfdt - f.tfdt) / ts : 0));
+  for (let i = spans.length - 1; i >= 0; i--) {
+    if (spans[i] > 0.01) continue;
+    const prev = spans.slice(0, i).reverse().find((v) => v > 0.01);
+    if (prev) spans[i] = prev;
+  }
+
+  const pts = [];
+  for (let i = 0; i < sorted.length; i++) {
+    if (!(spans[i] > 0.01)) continue;
+    pts.push({ t: sorted[i].tfdt / ts, kbps: (sorted[i].bytes * 8) / spans[i] / 1000 });
+  }
+  return pts;
+}
+
 function analyse(file) {
   let totalDup = 0;
   let totalBack = 0;
+  let totalJump = 0;
+  let lowRate = 0;
   const raw = readFileSync(file);
   const u8 = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
   console.log('\n' + file + '  (' + fixed(raw.length / 1048576, 1) + ' MB)');
@@ -139,21 +203,23 @@ function analyse(file) {
   const frags = scanFragments(u8);
 
   const span = (list, ts) => {
-    const vals = list.map((f) => f.tfdt).filter((v) => v != null);
-    if (!vals.length || !ts) return null;
-    const start = Math.min(...vals) / ts;
-    const last = list[list.length - 1];
-    const end = (last.tfdt + (last.samples || 0) * (list.length > 1
-      ? (list[1].tfdt - list[0].tfdt) / (list[0].samples || 1)
-      : 0)) / ts;
-    return { start, end: Number.isFinite(end) && end > start ? end : Math.max(...vals) / ts };
+    // 排序后再取首尾：文件里的分片顺序可能是乱的，按到达顺序算会得出「只有 10 秒」这种假象
+    const sorted = list.filter((f) => f.tfdt != null).sort((a, b) => a.tfdt - b.tfdt);
+    if (!sorted.length || !ts) return null;
+    const last = sorted[sorted.length - 1];
+    const prev = sorted[sorted.length - 2];
+    const step = prev ? (last.tfdt - prev.tfdt) / ts : 0;
+    return { start: sorted[0].tfdt / ts, end: last.tfdt / ts + (step > 0 ? step : 0) };
   };
 
   for (const t of tracks) {
     const kind = t.handler === 'soun' ? 'audio' : t.handler === 'vide' ? 'video' : t.handler;
     let line = '  轨道 ' + t.id + '  ' + kind + '  ' + (t.codec || '?');
     if (kind === 'video') line += '  ' + Math.round(t.w) + 'x' + Math.round(t.h) + '  ';
-    if (t.asc) line += '  ' + t.asc.label + '  ' + t.asc.rate + ' Hz  ' + t.asc.channels + ' ch  ';
+    if (t.asc) {
+      const hz = t.asc.outRate > t.asc.rate ? t.asc.rate + ' Hz（SBR 输出 ' + t.asc.outRate + '）' : t.asc.rate + ' Hz';
+      line += '  ' + t.asc.label + '  ' + hz + '  ' + t.asc.channels + ' ch  ';
+    }
     line += '  timescale ' + t.timescale;
     console.log(line);
 
@@ -172,9 +238,34 @@ function analyse(file) {
     console.log('    分片 ' + list.length + ' 段，样本 ' + samples + '，时间轴 ' +
       fixed(sp.start) + ' → ' + fixed(sp.end) + ' s，重复 tfdt ' + dupN + ' 处，回退 ' + backN + ' 处');
 
+    const pts = bitratePoints(list, t.timescale);
+    if (pts.length >= 2) {
+      const kbs = pts.map((p) => p.kbps).sort((a, b) => a - b);
+      const avg = kbs.reduce((a, b) => a + b, 0) / kbs.length;
+      if (kind === 'audio') lowRate = Math.min(lowRate || 1e9, kbs[0]);
+      let line = '    码率 平均 ' + avg.toFixed(1) + ' kbps，最低 ' + kbs[0].toFixed(1) +
+        '，最高 ' + kbs[kbs.length - 1].toFixed(1);
+      if (t.esds && t.esds.avg) line += '（容器声明 ' + Math.round(t.esds.avg / 1000) + ' kbps）';
+      console.log(line);
+
+      const jumps = [];
+      for (let i = 1; i < pts.length; i++) {
+        const r = pts[i].kbps / (pts[i - 1].kbps || 1);
+        if (r > 1.6 || r < 0.62) {
+          jumps.push(fixed(pts[i].t, 1) + 's ' + pts[i - 1].kbps.toFixed(0) + '→' + pts[i].kbps.toFixed(0));
+        }
+      }
+      if (jumps.length) {
+        console.log('    码率跳变 ' + jumps.length + ' 处：' + jumps.slice(0, 6).join('，') +
+          (jumps.length > 6 ? ' …' : ''));
+        totalJump += jumps.length;
+      }
+    }
+
     if (t.asc && /SBR|PS/.test(t.asc.label)) {
-      console.log('    · 源音频是 ' + t.asc.label + '：核心采样率 ' + t.asc.rate +
-        ' Hz，高频由 SBR 扩展还原。主流播放器能解出完整带宽，这一项由源文件决定，与导出无关。');
+      console.log('    · 源音频是 ' + t.asc.label + '：核心采样率 ' + t.asc.rate + ' Hz' +
+        (t.asc.outRate > t.asc.rate ? '，SBR 还原到 ' + t.asc.outRate + ' Hz' : '') +
+        '。这是源文件的编码方式，导出不重新编码；能否听出高频取决于播放器是否处理 SBR。');
     }
     if (t.asc && t.asc.channels === 1) {
       console.log('    · 单声道，与网页播放时的立体声相比会变窄。');
@@ -196,10 +287,17 @@ function analyse(file) {
   if (totalDup) {
     console.log('  结论：有 ' + totalDup + ' 段分片被重复录制。播放器 seek 时会重新 append 已播过的段，');
     console.log('        视频重复只是跳帧，音频重复是同一段时间叠着播两遍——听感就是浑浊、回声。');
+  } else if (totalJump >= 3) {
+    console.log('  结论：分片顺序没问题，但音频码率在一路里跳了 ' + totalJump + ' 次，说明录进了几个不同档位的分片。');
+    console.log('        混着播时最低那档会把整条音轨的听感拖下去。');
+  } else if (lowRate && lowRate < 48) {
+    console.log('  结论：分片顺序没问题，但音频码率最低只有 ' + lowRate.toFixed(1) + ' kbps。');
+    console.log('        这是源或档位本身的质量，不是导出过程造成的。');
   } else if (totalBack) {
     console.log('  结论：时间轴有 ' + totalBack + ' 处回退，音频可能因此卡顿或错位。');
   } else {
-    console.log('  结论：分片无重复、时间轴单调，音质问题不在录制环节。');
+    console.log('  结论：分片无重复、时间轴单调、码率平稳。数据层面正常，');
+    console.log('        若听感仍与网页不同，先把同一个文件用浏览器打开对比，那一步能区分是数据问题还是解码器差异。');
   }
 }
 
