@@ -23,6 +23,7 @@ This is an Edge / Chrome extension built on Manifest V3. Segments are fetched ei
 ## Usage
 
 1. Let the video play for a few seconds. The list fills as the page requests media.
+   Once a video is found, the toolbar icon carries a red badge with the number of video sources. Pages without video show none
 2. Open the popup from the extension icon. Each video appears as one card, and the qualities of one video sit in a single dropdown with the highest selected by default.
 3. Select a quality and choose **Download**
 4. Switch to **Downloads** to follow progress. Ordinary tasks offer pause, resume and save. Live tasks offer **Stop & save** only.

@@ -24,6 +24,10 @@ function ok(cond, label, extra) {
 const sessionStore = new Map();
 const messageListeners = [];
 const headerListeners = [];
+const tabRemovedListeners = [];
+const tabUpdatedListeners = [];
+const badgeTexts = [];   // { tabId, text }
+const badgeColors = [];  // { tabId, color }
 const tabs = [
   { id: 42, url: 'https://x.com/axoo_o/status/2112363173596783023', title: 'axoo on X: "测试"', active: true },
   { id: 43, url: 'https://example.com/watch', title: '示例页', active: false }
@@ -58,9 +62,13 @@ globalThis.chrome = {
       return tabs.filter((t) => t.url.startsWith(origin));
     },
     get: async (id) => tabs.find((t) => t.id === id) || { id, title: '' },
-    onRemoved: { addListener: () => {} },
-    onUpdated: { addListener: () => {} },
+    onRemoved: { addListener: (fn) => tabRemovedListeners.push(fn) },
+    onUpdated: { addListener: (fn) => tabUpdatedListeners.push(fn) },
     sendMessage: async () => ({ ok: true })
+  },
+  action: {
+    setBadgeText: async (o) => badgeTexts.push(o),
+    setBadgeBackgroundColor: async (o) => badgeColors.push(o)
   },
   webRequest: {
     onHeadersReceived: { addListener: (fn) => headerListeners.push(fn) }
@@ -98,6 +106,20 @@ function fireMsg(msg, sender = {}) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** 某个 tabId 最近一次角标文本（undefined = 还没写过） */
+function lastBadge(tabId) {
+  for (let i = badgeTexts.length - 1; i >= 0; i--) {
+    if (badgeTexts[i].tabId === tabId) return badgeTexts[i].text;
+  }
+  return undefined;
+}
+const lastBadgeColor = (tabId) => {
+  for (let i = badgeColors.length - 1; i >= 0; i--) {
+    if (badgeColors[i].tabId === tabId) return badgeColors[i].color;
+  }
+  return undefined;
+};
 
 /* ---------- 用例 ---------- */
 console.log('[1] 普通请求：tabId 有效');
@@ -189,6 +211,68 @@ console.log('\n[5] 被丢弃的可疑请求要留证');
   await sleep(50);
   const r = await fireMsg({ target: 'sw', type: 'list', tabId: 42 });
   ok(r.diag.ignored.some((x) => x.url.includes('tiny.mp4')), '过小的 mp4 进入诊断 ignored');
+}
+
+console.log('\n[6] 图标角标：红点只数视频卡片');
+{
+  // [1] 已给 tab 43 归档了 1 条 hls（index.m3u8，路径无长数字 ID，自成一卡）
+  await sleep(30);
+  ok(lastBadge(43) === '1', '有视频源时红点显示 1', 'text=' + lastBadge(43));
+  ok(/^#/.test(String(lastBadgeColor(43))), '红点带背景色', String(lastBadgeColor(43)));
+
+  // 同一视频的另一档变体：共用路径里的长数字 ID，仍是一张卡片
+  fireHeaders({
+    url: 'https://cdn.example.com/movie/87654321/index.m3u8',
+    tabId: 43, type: 'xmlhttprequest', frameId: 0, initiator: 'https://example.com',
+    documentUrl: 'https://example.com/watch',
+    responseHeaders: [{ name: 'content-type', value: 'application/vnd.apple.mpegurl' }]
+  });
+  await sleep(60);
+  ok(lastBadge(43) === '2', '新增视频后红点变为 2', 'text=' + lastBadge(43));
+  fireHeaders({
+    url: 'https://cdn.example.com/movie/87654321/720p.m3u8',
+    tabId: 43, type: 'xmlhttprequest', frameId: 0, initiator: 'https://example.com',
+    documentUrl: 'https://example.com/watch',
+    responseHeaders: [{ name: 'content-type', value: 'application/vnd.apple.mpegurl' }]
+  });
+  await sleep(60);
+  ok(lastBadge(43) === '2', '同视频的另一档不计入红点', 'text=' + lastBadge(43));
+
+  // 纯音轨不算视频
+  fireHeaders({
+    url: 'https://cdn.example.com/clips/CMAF_AUDIO_64.mp4',
+    tabId: 43, type: 'xmlhttprequest', frameId: 0, initiator: 'https://example.com',
+    documentUrl: 'https://example.com/watch',
+    responseHeaders: [
+      { name: 'content-type', value: 'video/mp4' },
+      { name: 'content-length', value: '1048576' }
+    ]
+  });
+  await sleep(60);
+  ok(lastBadge(43) === '2', '纯音轨不计入红点', 'text=' + lastBadge(43));
+
+  // 再来一个真正的视频
+  fireHeaders({
+    url: 'https://cdn.example.net/other/99887766/1080p.mp4',
+    tabId: 43, type: 'xmlhttprequest', frameId: 0, initiator: 'https://example.com',
+    documentUrl: 'https://example.com/watch',
+    responseHeaders: [
+      { name: 'content-type', value: 'video/mp4' },
+      { name: 'content-length', value: '52428800' }
+    ]
+  });
+  await sleep(60);
+  ok(lastBadge(43) === '3', '红点变为 3', 'text=' + lastBadge(43));
+
+  // 跨站跳转清空列表，红点随之消失（第一次回调只记录当前 URL）
+  const [onUpdated] = tabUpdatedListeners;
+  onUpdated(43, { url: 'https://example.com/watch' });
+  onUpdated(43, { url: 'https://example.org/another' });
+  await sleep(30);
+  ok(lastBadge(43) === '', '跨站跳转后红点消失', 'text=' + JSON.stringify(lastBadge(43)));
+
+  // 没有视频源的标签页从未被写过红点
+  ok(lastBadge(99) === undefined, '无视频的标签页不显示红点');
 }
 
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');

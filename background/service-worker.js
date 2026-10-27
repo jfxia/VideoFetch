@@ -233,6 +233,7 @@ async function addMedia(tabId, patch) {
   }
   await persistTab(tabId);
   notifyPopup();
+  updateBadge(tabId);
   return item;
 }
 
@@ -240,6 +241,57 @@ function clearTab(tabId) {
   mediaByTab.delete(tabId);
   diagByTab.delete(tabId);
   chrome.storage.session.remove('vf:tab:' + tabId).catch(() => {});
+  updateBadge(tabId);
+}
+
+/* ---------------- 图标角标 ---------------- */
+
+const BADGE_COLOR = '#DE350B';
+const BADGE_URL_RE = /(?:^|[\/_.-])audio(?:[\/_.-]|$)/i;
+const BADGE_EXT_RE = /\.(m4a|mp3|aac|oga|opus|flac|wav)(?:[?#]|$)/i;
+
+/** 与 popup 的 groupKeyOf 同一规则：路径里的长数字 ID 聚成一张卡片，红点按卡片数计 */
+function badgeGroupKey(item) {
+  if (item.type === 'blob') return 'blob:' + (item.recId || item.url);
+  try {
+    const x = new URL(item.url);
+    const seg = x.pathname.split('/').filter(Boolean);
+    for (let i = 0; i < seg.length; i++) {
+      if (/^\d{8,}$/.test(seg[i])) return x.hostname + '/' + seg[i];
+    }
+  } catch {}
+  return item.url;
+}
+
+/** 红点只数视频；纯音轨（按 mime 与文件名可判定时）不算 */
+function isAudioOnlyItem(item) {
+  if (!item || item.type === 'blob') return false;
+  if (/^audio\//i.test(String(item.mime || ''))) return true;
+  let p = '';
+  try { p = new URL(item.url).pathname; } catch { p = String(item.url || ''); }
+  if (BADGE_EXT_RE.test(p)) return true;
+  const base = p.split('/').pop() || '';
+  return BADGE_URL_RE.test(base) && !/video/i.test(base);
+}
+
+function videoGroupCount(tabId) {
+  const m = mediaByTab.get(tabId);
+  if (!m) return 0;
+  const keys = new Set();
+  for (const it of m.values()) {
+    if (it.stale || isAudioOnlyItem(it)) continue;
+    keys.add(badgeGroupKey(it));
+  }
+  return keys.size;
+}
+
+function updateBadge(tabId) {
+  if (tabId == null || tabId < 0 || !chrome.action) return;
+  const n = videoGroupCount(tabId);
+  try {
+    chrome.action.setBadgeText({ tabId, text: n > 0 ? String(Math.min(n, 99)) : '' });
+    if (n > 0) chrome.action.setBadgeBackgroundColor({ tabId, color: BADGE_COLOR });
+  } catch {}
 }
 
 /* ------------------------------------------------------------------ */
