@@ -114,11 +114,11 @@
     if (!info.ok) return info;
 
     var meta = info.info || {};
-    var total = meta.parts || 1;
     var sent = 0;
     var bytes = 0;
 
-    for (var i = 0; i < total; i++) {
+    // 磁盘溢写模式下分段数会在导出过程中增长（录制未停时），读到 done 为止
+    for (var i = 0; i < 1000000; i++) {
       var r = await callMain('chunk', { recId: recId, index: i, bucket: bucket }, 25000);
       if (!r.ok) return r;
       if (r.done) break;

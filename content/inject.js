@@ -14,6 +14,10 @@
   window.__VF_INSTALLED__ = true;
 
   var MAX_REC_BYTES = 400 * 1024 * 1024;
+  // 磁盘溢写：录制数据进 OPFS（站点同源的私有磁盘区）后内存只过手，
+  // 上限从内存变成磁盘；写不进去的旧环境退回内存模式，沿用上面的保护值
+  var OPFS_PREFIX = 'vf-rec-';
+  var SEG_BYTES = 8 * 1024 * 1024;
   var MEDIA_RE = /\.(m3u8|m3u|mpd|mp4|m4v|webm|mkv|mov|flv|f4v|mp3|m4a|aac|ogg|oga|opus|wav|flac)(?:[?#]|$)/i;
   var SEG_RE = /\.(ts|m4s|cmfv|cmfa|m4f)(?:[?#]|$)/i;
   // 图片、文档这类非媒体内容，第一道就拦掉，省得进消息管道
@@ -24,6 +28,78 @@
   var STATIC_BLOBS = new Map(); // recId -> Blob
   var MS_REC = new WeakMap(); // MediaSource -> record
   var recSeq = 0;
+
+  /* ---------------- OPFS 磁盘溢写 ---------------- */
+  var opfsRoot = null;
+  var OPFS_OK = false;
+  try {
+    if (navigator.storage && navigator.storage.getDirectory) {
+      navigator.storage.getDirectory().then(function (dir) {
+        opfsRoot = dir;
+        OPFS_OK = true;
+        cleanupOpfs();
+      }, function () {});
+    }
+  } catch (e) {}
+
+  /** 上次会话没来得及删的录制分片（页面被直接关掉），超过一天清掉 */
+  function cleanupOpfs() {
+    try {
+      if (!opfsRoot || typeof opfsRoot.values !== 'function') return;
+      opfsRoot.values().then(function (it) {
+        var step = function () {
+          it.next().then(function (r) {
+            if (r.done) return;
+            var fh = r.value;
+            fh.getFile().then(function (f) {
+              if (f.name.indexOf(OPFS_PREFIX) === 0 && Date.now() - f.lastModified > 86400000) {
+                opfsRoot.removeEntry(f.name).catch(function () {});
+              }
+            }).catch(function () {});
+            step();
+          }, function () {});
+        };
+        step();
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
+  function concatSeg(seg) {
+    var n = 0;
+    for (var i = 0; i < seg.length; i++) n += seg[i].byteLength;
+    var out = new Uint8Array(n);
+    var off = 0;
+    for (var j = 0; j < seg.length; j++) {
+      out.set(seg[j], off);
+      off += seg[j].byteLength;
+    }
+    return out.buffer;
+  }
+
+  /** 把攒够 8MB 的内存段写成 OPFS 分片文件；失败就地截断，退不回内存（前段已在盘上） */
+  function flushBucket(b) {
+    if (!b.segBytes || b.failed) return;
+    var seg = b.seg;
+    var no = b.segNo++;
+    b.seg = [];
+    b.segBytes = 0;
+    b.wq = b.wq.then(function () {
+      return b.dir.getFileHandle(b.name + no + '.bin', { create: true })
+        .then(function (h) { return h.createWritable(); })
+        .then(function (w) {
+          var p = Promise.resolve();
+          for (var i = 0; i < seg.length; i++) {
+            (function (u8) {
+              p = p.then(function () { return w.write(u8); });
+            })(seg[i]);
+          }
+          return p.then(function () { return w.close(); });
+        });
+    }).catch(function (e) {
+      b.failed = true;
+      if (b.rec) b.rec.truncated = true;
+    });
+  }
 
   function emit(kind, data) {
     try {
@@ -210,7 +286,16 @@
         try {
           var rec = recFor(this);
           if (!rec.mime) rec.mime = mime;
-          var bucket = { mime: mime, parts: [], size: 0 };
+          var bucket = {
+            mime: mime, parts: [], size: 0,
+            // 磁盘溢写可用就落盘，内存里只留未满 8MB 的当前段
+            spill: OPFS_OK && !!opfsRoot,
+            dir: opfsRoot,
+            name: OPFS_PREFIX + rec.id + '-' + rec.bufSeq + '-',
+            seg: [], segBytes: 0, segNo: 0,
+            wq: Promise.resolve(), failed: false,
+            rec: rec
+          };
           rec.buffers.set(++rec.bufSeq, bucket);
           rec.os = rec.os || [];
           rec.os.push({ t: Date.now(), k: rec.bufSeq, n: 0 });
@@ -218,7 +303,7 @@
           var origAppend = sb.appendBuffer;
           sb.appendBuffer = function (data) {
             try {
-              if (data && rec.total < MAX_REC_BYTES) {
+              if (data) {
                 var u8 = null;
                 if (data instanceof ArrayBuffer) {
                   u8 = new Uint8Array(data.slice(0));
@@ -226,10 +311,23 @@
                   u8 = new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
                 }
                 if (u8 && u8.byteLength) {
-                  bucket.parts.push(u8);
-                  bucket.size += u8.byteLength;
-                  rec.total += u8.byteLength;
-                  if (rec.total >= MAX_REC_BYTES) rec.truncated = true;
+                  if (bucket.spill && !bucket.failed) {
+                    // 落盘模式：内存只攒一个 8MB 段，攒满写盘释放
+                    bucket.seg.push(u8);
+                    bucket.segBytes += u8.byteLength;
+                    bucket.size += u8.byteLength;
+                    rec.total += u8.byteLength;
+                    if (bucket.segBytes >= SEG_BYTES) flushBucket(bucket);
+                  } else if (!bucket.spill) {
+                    // 内存模式：老环境的兜底，保留 400MB 保护
+                    if (rec.total < MAX_REC_BYTES) {
+                      bucket.parts.push(u8);
+                      bucket.size += u8.byteLength;
+                      rec.total += u8.byteLength;
+                      if (rec.total >= MAX_REC_BYTES) rec.truncated = true;
+                    }
+                  }
+                  // 溢写中途失败（磁盘配额）的桶不再收数据，truncated 已标记
                   emit('mse-progress', { recId: rec.id, total: rec.total, mime: rec.mime, truncated: rec.truncated });
                 }
               }
@@ -318,8 +416,13 @@
     var pick = pickBucket(rec);
     var list = [];
     rec.buffers.forEach(function (b, k) {
-      list.push({ key: k, mime: b.mime || '', bytes: b.size, parts: b.parts.length });
+      list.push({
+        key: k, mime: b.mime || '', bytes: b.size,
+        parts: b.spill ? b.segNo + (b.segBytes ? 1 : 0) : b.parts.length,
+        spill: b.spill && !b.failed
+      });
     });
+    var pk = pick.bucket;
     return {
       recId: rec.id,
       mime: rec.mime,
@@ -327,9 +430,9 @@
       truncated: rec.truncated,
       createdAt: rec.createdAt,
       buffers: rec.buffers.size,
-      parts: pick.bucket ? pick.bucket.parts.length : 0,
-      bytes: pick.bucket ? pick.bucket.size : 0,
-      bucketMime: pick.bucket ? pick.bucket.mime : '',
+      parts: pk ? (pk.spill ? pk.segNo + (pk.segBytes ? 1 : 0) : pk.parts.length) : 0,
+      bytes: pk ? pk.size : 0,
+      bucketMime: pk ? pk.mime : '',
       buckets: list
     };
   }
@@ -375,18 +478,54 @@
           ? { bucket: r2.buffers.get(d.bucket), key: d.bucket }
           : pickBucket(r2);
         if (!pick.bucket) return reply({ ok: false, error: '暂无录制数据' });
+        var b = pick.bucket;
         var i = d.index | 0;
-        if (i >= pick.bucket.parts.length) return reply({ ok: true, done: true });
+        if (b.spill) {
+          // 磁盘模式：index 指向已写盘的分段，最后一段是还在内存里的尾巴
+          if (i < b.segNo) {
+            b.wq.then(function () {
+              return b.dir.getFileHandle(b.name + i + '.bin', { create: false })
+                .then(function (h) { return h.getFile(); })
+                .then(function (f) { return f.arrayBuffer(); })
+                .then(function (ab) {
+                  reply({ ok: true, data: ab, mime: b.mime, last: !!(i === b.segNo - 1 && !b.segBytes), index: i });
+                });
+            }).catch(function (e) {
+              reply({ ok: false, error: String(e && e.message || e) });
+            });
+            return;
+          }
+          if (i === b.segNo && b.segBytes) {
+            reply({ ok: true, data: concatSeg(b.seg), mime: b.mime, last: true, index: i });
+            return;
+          }
+          return reply({ ok: true, done: true });
+        }
+        if (i >= b.parts.length) return reply({ ok: true, done: true });
         reply({
           ok: true,
-          data: pick.bucket.parts[i].slice().buffer,
-          mime: pick.bucket.mime,
-          last: i === pick.bucket.parts.length - 1,
+          data: b.parts[i].slice().buffer,
+          mime: b.mime,
+          last: i === b.parts.length - 1,
           index: i
         });
         return;
       }
       if (d.cmd === 'drop') {
+        var rd = RECS.get(d.recId);
+        if (rd) {
+          rd.buffers.forEach(function (b2) {
+            if (b2.spill && b2.dir) {
+              b2.wq.then(function () {
+                for (var j = 0; j < b2.segNo; j++) {
+                  (function (nm) {
+                    b2.dir.removeEntry(nm).catch(function () {});
+                  })(b2.name + j + '.bin');
+                }
+              }).catch(function () {});
+            }
+          });
+        }
         RECS.delete(d.recId);
         STATIC_BLOBS.delete(d.recId);
         return reply({ ok: true });

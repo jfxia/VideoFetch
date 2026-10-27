@@ -151,7 +151,7 @@ node _dev/test-pause.mjs        #  82  pause / resume / snapshot saving on slow 
 
 - **No DRM support**: Widevine, FairPlay and `SAMPLE-AES` streams return an error
 - **HEVC and AC3 in TS**: these are saved as `.ts`, because mux.js handles only H.264 with AAC / MP3
-- **Blob recording captures what has played**: about 400 MB at most, and it cannot be paused
+- **Blob recording captures what has played** and cannot be paused. The data goes to the browser's private disk area for the site, so size is no longer capped in practice (browser disk quota applies). Environments without that area fall back to memory with an about 400 MB cap
 - **A live stream needs a manual stop**: recording runs until **Stop & save** is pressed. Pausing a live task loses whatever was not captured
 - **Separate audio tracks are not merged for live**: the result may be silent
 - **Pause state lives in the background context**: the cursor is held in the offscreen document's memory and OPFS. Reloading the extension discards it, and the task has to start over

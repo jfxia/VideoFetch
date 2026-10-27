@@ -22,8 +22,11 @@ function ok(cond, label, extra) {
 
 const events = [];
 const perfEntries = [];
+const msgListeners = [];   // window 'message' 监听器：测试用它向 hook 下发命令
 
-function makeCtx(fetchImpl) {
+function makeCtx(fetchImpl, storageMock) {
+  const nav = { userAgent: 'node-test' };
+  if (storageMock) nav.storage = storageMock;
   const ctx = {
     console,
     setTimeout: (fn) => setTimeout(fn, 5),
@@ -32,14 +35,16 @@ function makeCtx(fetchImpl) {
     clearInterval: () => {},
     btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
     performance: { getEntriesByType: () => perfEntries },
-    navigator: { userAgent: 'node-test' },
+    navigator: nav,
     location: { href: 'https://x.com/axoo_o/status/2112363173596783023' },
     document: {
       baseURI: 'https://x.com/axoo_o/status/2112363173596783023',
       querySelectorAll: () => []
     },
     postMessage: (m) => events.push(m),
-    addEventListener: () => {},
+    addEventListener: (type, fn) => {
+      if (type === 'message') msgListeners.push(fn);
+    },
     fetch: fetchImpl,
     URL: class extends URL {
       static createObjectURL = () => 'blob:https://x.com/1';
@@ -63,6 +68,57 @@ function makeCtx(fetchImpl) {
   ctx.globalThis = ctx;
   return vm.createContext(ctx);
 }
+
+/** 内存版 OPFS：getFileHandle/createWritable/getFile/removeEntry 全套，files 可检查 */
+function makeOpfs() {
+  const files = new Map(); // name -> Uint8Array
+  const dir = {
+    getFileHandle: async (name, opts) => ({
+      name,
+      createWritable: async () => {
+        let buf = files.has(name) ? files.get(name) : new Uint8Array(0);
+        return {
+          write: async (data) => {
+            const u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
+            const merged = new Uint8Array(buf.length + u8.length);
+            merged.set(buf);
+            merged.set(u8, buf.length);
+            buf = merged;
+          },
+          close: async () => { files.set(name, buf); }
+        };
+      },
+      getFile: async () => {
+        const b = files.get(name);
+        if (!b) throw new Error('NotFoundError');
+        return {
+          name,
+          size: b.length,
+          lastModified: Date.now(),
+          arrayBuffer: async () => b.slice().buffer
+        };
+      }
+    }),
+    removeEntry: async (name) => { files.delete(name); },
+    values: async function* () {
+      for (const [n, b] of files) {
+        yield { getFile: async () => ({ name: n, size: b.length, lastModified: Date.now() }) };
+      }
+    }
+  };
+  return { files, storage: { getDirectory: async () => dir } };
+}
+
+/** 向 hook 下发一条命令并取回回复 */
+async function sendCmd(ctx, cmd, extra = {}) {
+  const id = cmdEvents();
+  const ev = { data: Object.assign({ __vf: 'cmd', cmd, id }, extra) };
+  for (const fn of msgListeners) fn(ev);
+  await sleep(30);
+  return events.filter((e) => e.__vf === 'reply' && e.id === id).pop();
+}
+let cmdSeq = 0;
+function cmdEvents() { return 'cmd' + ++cmdSeq; }
 
 function jsonResponse(obj) {
   return {
@@ -161,6 +217,81 @@ console.log('\n[5] 图片与文档地址不捕获');
   await ctx.fetch('https://cdn.example.com/doc/report.pdf');
   await sleep(20);
   ok(!events.some((e) => e.kind === 'media' && /\.jpe?g|\.pdf/i.test(e.data.url || '')), '图片与文档地址未上报');
+}
+
+/* ---------- [6] MSE 录制：磁盘溢写 ---------- */
+console.log('\n[6] MSE 录制写入 OPFS，内存不留存');
+{
+  events.length = 0;
+  msgListeners.length = 0;
+  const opfs = makeOpfs();
+  const ctx = makeCtx(async () => playResponse('text/html'), opfs.storage);
+  // 必须在注入前就挂上原型方法，hook 才有得包
+  ctx.MediaSource.prototype.addSourceBuffer = function (mime) {
+    return { appendBuffer(d) {}, MIME: mime };
+  };
+  vm.runInContext(readFileSync(new URL('../content/inject.js', import.meta.url), 'utf8'), ctx);
+  await sleep(20); // 等 getDirectory 完成
+
+  // 页面按 MSE 播放：new MediaSource → addSourceBuffer → 逐片 appendBuffer
+  vm.runInContext(`
+    var ms = new MediaSource();
+    var sb = ms.addSourceBuffer('video/mp4;codecs="avc1"');
+  `, ctx);
+  const MB = 1024 * 1024;
+  const chunk = (mb) => new Uint8Array(mb * MB).fill(7);
+  const run = (code) => vm.runInContext(code, ctx);
+  run('sb.appendBuffer(new Uint8Array(4 * 1024 * 1024).fill(7))');
+  run('sb.appendBuffer(new Uint8Array(4 * 1024 * 1024).fill(7))'); // 攒满 8MB → 写盘
+  run('sb.appendBuffer(new Uint8Array(1 * 1024 * 1024).fill(7))'); // 尾巴 1MB 留内存
+  await sleep(50); // 等写盘链完成
+
+  ok(events.some((e) => e.kind === 'mse-open'), '发出 mse-open');
+  const prog = events.filter((e) => e.kind === 'mse-progress');
+  ok(prog.length === 3 && prog[2].data.total === 9 * MB, 'mse-progress 累计到 9MB', prog.length && String(prog[2].data.total));
+  ok(opfs.files.size === 1, '攒满 8MB 才写盘，产生 1 个分片文件', [...opfs.files.keys()].join(','));
+
+  const info = await sendCmd(ctx, 'info', { recId: 'r1' });
+  ok(info && info.ok, 'info 正常返回');
+  ok(info && info.info && info.info.parts === 2, '分段数 = 1 个盘上分片 + 1 个内存尾巴', info && info.info && String(info.info.parts));
+  ok(info && info.info && info.info.bytes === 9 * MB, '体积 9MB', info && info.info && String(info.info.bytes));
+  ok(info && info.info && info.info.buckets[0].spill === true, '标记为溢写模式');
+
+  const c0 = await sendCmd(ctx, 'chunk', { recId: 'r1', index: 0 });
+  ok(c0 && c0.ok && c0.data && c0.data.byteLength === 8 * MB, '第 0 段从盘上读回 8MB', c0 && c0.data && String(c0.data.byteLength));
+  ok(c0 && !c0.last, '第 0 段不是最后一段');
+  const c1 = await sendCmd(ctx, 'chunk', { recId: 'r1', index: 1 });
+  ok(c1 && c1.ok && c1.data && c1.data.byteLength === 1 * MB && c1.last, '第 1 段是内存尾巴且标 last', c1 && c1.data && String(c1.data.byteLength));
+  const c2 = await sendCmd(ctx, 'chunk', { recId: 'r1', index: 2 });
+  ok(c2 && c2.ok && c2.done, '读完即 done');
+
+  await sendCmd(ctx, 'drop', { recId: 'r1' });
+  await sleep(30);
+  ok(opfs.files.size === 0, 'drop 连盘上分片一起删', String(opfs.files.size));
+}
+
+/* ---------- [7] 不支持 OPFS 时退回内存模式 ---------- */
+console.log('\n[7] 无 OPFS：退回内存模式，行为与旧版一致');
+{
+  events.length = 0;
+  msgListeners.length = 0;
+  const ctx = makeCtx(async () => playResponse('text/html'));
+  ctx.MediaSource.prototype.addSourceBuffer = function (mime) {
+    return { appendBuffer(d) {}, MIME: mime };
+  };
+  vm.runInContext(readFileSync(new URL('../content/inject.js', import.meta.url), 'utf8'), ctx);
+  await sleep(20);
+  vm.runInContext(`
+    var ms2 = new MediaSource();
+    var sb2 = ms2.addSourceBuffer('video/mp4');
+    sb2.appendBuffer(new Uint8Array(3 * 1024 * 1024).fill(1));
+  `, ctx);
+  await sleep(20);
+  const info = await sendCmd(ctx, 'info', { recId: 'r1' });
+  ok(info && info.info && info.info.bytes === 3 * 1024 * 1024, '内存模式照常累计', info && info.info && String(info.info.bytes));
+  ok(info && info.info && info.info.buckets[0].spill === false, '标记为内存模式');
+  const c0 = await sendCmd(ctx, 'chunk', { recId: 'r1', index: 0 });
+  ok(c0 && c0.ok && c0.data && c0.data.byteLength === 3 * 1024 * 1024 && c0.last, '单段内存直接可导出');
 }
 
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');
