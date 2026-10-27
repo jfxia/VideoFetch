@@ -16,6 +16,8 @@
   var MAX_REC_BYTES = 400 * 1024 * 1024;
   var MEDIA_RE = /\.(m3u8|m3u|mpd|mp4|m4v|webm|mkv|mov|flv|f4v|mp3|m4a|aac|ogg|oga|opus|wav|flac)(?:[?#]|$)/i;
   var SEG_RE = /\.(ts|m4s|cmfv|cmfa|m4f)(?:[?#]|$)/i;
+  // 图片、文档这类非媒体内容，第一道就拦掉，省得进消息管道
+  var NON_MEDIA_RE = /\.(?:jpe?g|png|gif|webp|avif|bmp|svg|ico|tiff?|heic|pdf|zip|rar|7z|gz|docx?|xlsx?|pptx?|txt|xml|html?|css|js|mjs|json|woff2?|ttf|eot)(?:[?#]|$)/i;
 
   var reported = new Set();
   var RECS = new Map();       // recId -> record
@@ -44,6 +46,7 @@
       if (s.indexOf('data:') === 0 || s.indexOf('blob:') === 0) return;
       var u = absUrl(s);
       if (!/^https?:/i.test(u)) return;
+      if (NON_MEDIA_RE.test(u)) return;
       if (reported.has(u)) return;
       if (SEG_RE.test(u) && !/m3u8/i.test(u)) return;
       // 扩展名缺失时的启发式：路径/查询里带 HLS 特征词（部分 CDN 用无扩展名 URL）

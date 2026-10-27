@@ -287,9 +287,14 @@ function heightOf(u) {
 }
 
 /** 带非媒体 content-type 的直链是噪音（JSON 接口、网页、图片） */
+/** 非媒体扩展名：图片、文档、压缩包，任何通道上报都不该出现在列表里 */
+const NON_MEDIA_EXT = /\.(?:jpe?g|png|gif|webp|avif|bmp|svg|ico|tiff?|heic|pdf|zip|rar|7z|gz|docx?|xlsx?|pptx?|txt|xml|html?|css|js|mjs|json|woff2?|ttf|eot)(?:[?#]|$)/i;
+
 function isNoise(item) {
   if (item.type !== 'file') return false;
+  if (NON_MEDIA_EXT.test(item.url)) return true;
   const mime = String(item.mime || '').toLowerCase();
+  if (/^image\//.test(mime)) return true;
   const hasExt = /\.(mp4|m4v|webm|mkv|mov|flv|f4v|mp3|m4a|aac|ogg|oga|opus|wav|flac)(?:[?#]|$)/i.test(item.url);
   if (!mime) return !hasExt;
   return !/^(video|audio)\/|octet-stream/i.test(mime);

@@ -284,5 +284,22 @@ console.log('\n[6] 图标角标：红点只数视频卡片');
   ok(lastBadge(99) === undefined, '无视频的标签页不显示红点');
 }
 
+console.log('\n[7] 非媒体内容不进列表');
+{
+  const before = (await fireMsg({ target: 'sw', type: 'list', tabId: 43 })).items.length;
+  await fireMsg(
+    { target: 'sw', type: 'page-media', items: [
+      { url: 'https://cdn.example.com/photo/big.JPEG?w=800', type: 'file' },
+      { url: 'https://cdn.example.com/photo/raw.jpg', type: 'file', mime: 'image/jpeg' },
+      { url: 'https://cdn.example.com/files/report.pdf', type: 'file' }
+    ] },
+    { tab: { id: 43, url: 'https://example.com/watch' }, frameId: 0 }
+  );
+  await sleep(80);
+  const r = await fireMsg({ target: 'sw', type: 'list', tabId: 43 });
+  ok(r.items.length === before, '图片与文档没有增加列表条目');
+  ok(!r.items.some((i) => /\.(?:jpe?g|pdf)(?:[?#]|$)/i.test(i.url)), '列表中无图片文档地址', r.items.map((i) => i.url).join(' ').slice(-80));
+}
+
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');
 process.exit(fail ? 1 : 0);

@@ -153,5 +153,15 @@ console.log('\n[4] Resource Timing 通道');
   ok(events.some((e) => e.kind === 'media' && /perfOnly\.m3u8/.test(e.data.url)), '从资源计时里捞到播放列表');
 }
 
+console.log('\n[5] 图片与文档地址不捕获');
+{
+  const ctx = makeCtx(async () => playResponse('image/jpeg'));
+  vm.runInContext(readFileSync(new URL('../content/inject.js', import.meta.url), 'utf8'), ctx);
+  await ctx.fetch('https://cdn.example.com/photo/big.JPEG?w=800');
+  await ctx.fetch('https://cdn.example.com/doc/report.pdf');
+  await sleep(20);
+  ok(!events.some((e) => e.kind === 'media' && /\.jpe?g|\.pdf/i.test(e.data.url || '')), '图片与文档地址未上报');
+}
+
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');
 process.exit(fail ? 1 : 0);

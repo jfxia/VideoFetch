@@ -183,11 +183,16 @@ async function persistTab(tabId) {
   } catch {}
 }
 
+/** 非媒体扩展名：图片、文档、压缩包，任何通道上报都不该进列表 */
+const NON_MEDIA_EXT = /\.(?:jpe?g|png|gif|webp|avif|bmp|svg|ico|tiff?|heic|pdf|zip|rar|7z|gz|docx?|xlsx?|pptx?|txt|xml|html?|css|js|mjs|json|woff2?|ttf|eot)(?:[?#]|$)/i;
+
 /** 非媒体 content-type 的直链属于噪音（JSON 接口、脚本、图片） */
 function isJunkItem(it) {
   if (!it || !it.url) return true;
+  if (NON_MEDIA_EXT.test(it.url)) return true;
   if (it.type !== 'file') return false;
   const mt = String(it.mime || '').toLowerCase();
+  if (/^image\//.test(mt)) return true;
   if (mt && !/^(video|audio)\/|octet-stream|mp2t/.test(mt)) return true;
   return false;
 }
