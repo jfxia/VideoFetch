@@ -6,7 +6,7 @@
 
 This is an Edge / Chrome extension built on Manifest V3. Segments are fetched eight at a time, and on sites that serve picture and sound as two files the tracks are aligned automatically.
 
-[Release notes](CHANGELOG.md) · [Supported sites](SUPPORTED_SITES.md)
+[Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/gbipmnjkkiecibncnjgmlepchnbfobaf) · [Release notes](CHANGELOG.md) · [Supported sites](SUPPORTED_SITES.md)
 
 <img src="docs/screenshot-1-sources-en.png" width="720" alt="Video source list with a quality picker">
 
@@ -14,7 +14,11 @@ This is an Edge / Chrome extension built on Manifest V3. Segments are fetched ei
 
 ## Install
 
-**To use it (recommended)**: download the latest `VideoFetch-<version>.zip` from [Releases](https://github.com/jfxia/VideoFetch/releases), unzip it, open `edge://extensions/` (Chrome: `chrome://extensions/`), enable **Developer mode** in the top right, choose **Load unpacked** and select the unzipped folder (the root of the archive is the extension itself, with no extra folder inside), then refresh the target page.
+**Edge (recommended)**: install from [Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/gbipmnjkkiecibncnjgmlepchnbfobaf). The browser handles installation and updates, and Developer mode is not needed.
+
+> Store builds go through Microsoft review and usually trail this repository, so new features arrive a version later. Install from the zip below when you need the newest build.
+
+**Chrome and other Chromium browsers**: download the latest `VideoFetch-<version>.zip` from [Releases](https://github.com/jfxia/VideoFetch/releases), unzip it, open `edge://extensions/` (Chrome: `chrome://extensions/`), enable **Developer mode** in the top right, choose **Load unpacked** and select the unzipped folder (the root of the archive is the extension itself, with no extra folder inside), then refresh the target page.
 
 > Content scripts run only at page load, so the page has to be refreshed once after installing or reloading the extension. Privileged pages such as `chrome://` and the extension stores do not work.
 

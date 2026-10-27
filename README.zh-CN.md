@@ -6,7 +6,7 @@
 
 这是一款 Edge / Chrome 扩展，基于 Manifest V3。分片以八路并发获取，音频与画面分轨的站点会自动对齐时间轴。
 
-[发行说明](CHANGELOG.md) · [支持的站点](SUPPORTED_SITES.md)
+[Edge 加载项](https://microsoftedge.microsoft.com/addons/detail/gbipmnjkkiecibncnjgmlepchnbfobaf) · [发行说明](CHANGELOG.md) · [支持的站点](SUPPORTED_SITES.md)
 
 <img src="docs/screenshot-1-sources-zh.png" width="720" alt="视频源列表与清晰度选择">
 
@@ -14,7 +14,11 @@
 
 ## 安装
 
-**只想使用（推荐）**：到 [Releases](https://github.com/jfxia/VideoFetch/releases) 下载最新的 `VideoFetch-<version>.zip`，解压后打开 `edge://extensions/`（Chrome 为 `chrome://extensions/`），开启右上角的「开发人员模式」，点击「加载解压缩的扩展」，选择解压出来的文件夹（压缩包根目录就是扩展文件，没有再套一层目录），最后刷新目标网页即可。
+**Edge 浏览器（推荐）**：在 [Microsoft Edge 加载项](https://microsoftedge.microsoft.com/addons/detail/gbipmnjkkiecibncnjgmlepchnbfobaf) 中点击「获取」，安装与后续更新由浏览器完成，无需开启开发人员模式。
+
+> 商店版本需经微软审核，通常落后于本仓库，新增功能要等下一版过审。需要使用最新版本时，改用下面的压缩包手动安装。
+
+**Chrome 或其他 Chromium 浏览器**：到 [Releases](https://github.com/jfxia/VideoFetch/releases) 下载最新的 `VideoFetch-<version>.zip`，解压后打开 `edge://extensions/`（Chrome 为 `chrome://extensions/`），开启右上角的「开发人员模式」，点击「加载解压缩的扩展」，选择解压出来的文件夹（压缩包根目录就是扩展文件，没有再套一层目录），最后刷新目标网页即可。
 
 > content script 仅在页面加载时注入，因此安装或重新加载扩展后需要刷新一次页面。`chrome://`、扩展商店等特权页面无法工作。
 
