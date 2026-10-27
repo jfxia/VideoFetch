@@ -301,5 +301,38 @@ console.log('\n[7] 非媒体内容不进列表');
   ok(!r.items.some((i) => /\.(?:jpe?g|pdf)(?:[?#]|$)/i.test(i.url)), '列表中无图片文档地址', r.items.map((i) => i.url).join(' ').slice(-80));
 }
 
+console.log('\n[7] 同路径不同签名参数的重复抓取合并为一条');
+{
+  const P = 'https://f.video.weibocdn.com/002TUY2Ulx/AbCdEf0104.mp4';
+  const fire = (ssig, len, expires) =>
+    fireHeaders({
+      url: `${P}?label=mp4_hd&Expires=${expires}&ssig=${ssig}`,
+      tabId: 43, type: 'xmlhttprequest', frameId: 0, initiator: 'https://example.org',
+      documentUrl: 'https://example.org/another',
+      responseHeaders: [
+        { name: 'content-type', value: 'video/mp4' },
+        { name: 'content-length', value: String(len) }
+      ]
+    });
+
+  fire('AAA', 10485760, 1760000000);
+  await sleep(60);
+  // 页面预取 + 播放器再取一次：签名变了，content-length 因 4 字节对齐略有出入
+  fire('BBB', 10485764, 1760003600);
+  await sleep(60);
+  let r = await fireMsg({ target: 'sw', type: 'list', tabId: 43 });
+  const mine = r.items.filter((i) => i.url.includes('weibocdn'));
+  ok(mine.length === 1, '同路径两次抓取只留一条', String(mine.length));
+  ok(mine[0] && mine[0].url.includes('ssig=BBB'), '保留新签名的地址', mine[0] && mine[0].url);
+  ok(mine[0] && mine[0].size === 10485760, '缺失时补齐 size，已有值不被覆盖', mine[0] && String(mine[0].size));
+
+  // 大小对不上（超过 1%）：不能当同一个文件（太小会被丢弃门槛拦下，这里用 4 MB）
+  fire('CCC', 4194304, 1760000000);
+  await sleep(60);
+  r = await fireMsg({ target: 'sw', type: 'list', tabId: 43 });
+  const mine2 = r.items.filter((i) => i.url.includes('weibocdn'));
+  ok(mine2.length === 2, '大小差异过大时不合并', String(mine2.length));
+}
+
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');
 process.exit(fail ? 1 : 0);

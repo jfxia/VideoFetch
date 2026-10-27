@@ -30,6 +30,19 @@ function normKey(url) {
   }
 }
 
+/** 资源身份：协议 + 主机 + 路径。查询串里的签名（微博 ssig/Expires 每次都变）不参与 */
+function resourceKeyOf(url) {
+  const s = String(url || '');
+  if (s.startsWith('blob:')) return '';
+  try {
+    const u = new URL(s);
+    if (u.pathname.length <= 1) return '';
+    return u.origin + u.pathname;
+  } catch {
+    return '';
+  }
+}
+
 function safeHost(url) {
   try {
     return new URL(url).hostname.replace(/^www\./, '');
@@ -209,6 +222,25 @@ async function addMedia(tabId, patch) {
     if (patch.size && !old.size) old.size = patch.size;
     if (patch.type === 'hls' && old.type !== 'hls') old.type = 'hls';
     return old;
+  }
+  // 同一资源路径的第二次抓取（页面预取 + 播放器各取一次，签名参数不同）
+  // 是同一个文件。用新地址顶掉旧条目，否则列表里出现两张一模一样的卡。
+  // 两次都有大小且对不上（差 1% 以上）时不算同一个文件，防误并。
+  const resKey = resourceKeyOf(patch.url);
+  if (resKey) {
+    for (const [, v] of m) {
+      if (v.stale || v.type !== (patch.type || 'file')) continue;
+      if (resourceKeyOf(v.url) !== resKey) continue;
+      if (v.size && patch.size && Math.abs(v.size - patch.size) > Math.max(v.size, patch.size) * 0.01) continue;
+      if (patch.mime && !v.mime) v.mime = patch.mime;
+      if (patch.size && !v.size) v.size = patch.size;
+      v.url = patch.url;
+      v.ts = Date.now();
+      await persistTab(tabId);
+      notifyPopup();
+      updateBadge(tabId);
+      return v;
+    }
   }
   const item = {
     id: uid(),
