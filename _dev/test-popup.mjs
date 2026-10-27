@@ -552,5 +552,58 @@ console.log('\n[10] 切到英文：同一份数据渲染出英文');
   ok(/没有可用清晰度/.test(textOf(nodes.get('task-list').children[0])), '切回中文仍原样保留');
 }
 
+/* ---------- 11. 重复源的区分参数 ---------- */
+console.log('\n[11] 重复源的区分参数');
+{
+  // 同名同主机的两路直链，大小不同：应显示各自体积与路径尾段
+  const A = 'https://cdn.example/video/8800012345/full.mp4';
+  const B = 'https://cdn.example/video/8800098765/trailer.mp4';
+  vm.runInContext(`items = ${JSON.stringify([
+    { id: 'a', url: A, type: 'file', mime: 'video/mp4', size: 52428800, title: '同名的视频', host: 'cdn.example', frameId: 0, from: 'network', ts: Date.now() },
+    { id: 'b', url: B, type: 'file', mime: 'video/mp4', size: 1048576, title: '同名的视频', host: 'cdn.example', frameId: 0, from: 'network', ts: Date.now() - 100 }
+  ])}`, ctx);
+  vm.runInContext('renderSources()', ctx);
+  const dup = nodes.get('src-list').children;
+  ok(dup.length === 2, '两条同源直链各自成卡', String(dup.length));
+  ok(/50\.0 MB/.test(textOf(dup[0])) && /1\.0 MB/.test(textOf(dup[1])), '直链卡片显示各自大小');
+  ok(/full\.mp4/.test(textOf(dup[0])) && /trailer\.mp4/.test(textOf(dup[1])), '同名卡片补路径尾段');
+
+  // 唯一标题的卡片不显示路径尾段
+  vm.runInContext(`items = ${JSON.stringify([
+    { id: 's', url: 'https://cdn.example/only/unique-name.mp4', type: 'file', mime: 'video/mp4', size: 2048, title: '独一无二的标题', host: 'cdn.example', frameId: 0, from: 'network', ts: Date.now() }
+  ])}`, ctx);
+  vm.runInContext('renderSources()', ctx);
+  ok(!/unique-name\.mp4/.test(textOf(nodes.get('src-list').children[0])), '不重名时不加尾段');
+
+  // HLS master：下拉带编码器与估算体积，卡片 meta 带 ≈ 体积
+  const M2 = 'https://cdn.example/hls/8800099999/master.m3u8';
+  vm.runInContext(`probeCache.set(${JSON.stringify(M2)}, {
+    ok: true, type: 'master', live: false, duration: 600,
+    variants: [
+      { index: 0, label: '1920x1080', bandwidth: 2176000, resolution: '1920x1080', codecs: 'avc1.640028,mp4a.40.2', uri: 'https://cdn.example/hls/8800099999/1080.m3u8' },
+      { index: 1, label: '1280x720', bandwidth: 832000, resolution: '1280x720', codecs: 'hvc1.1.6.L93.B0', uri: 'https://cdn.example/hls/8800099999/720.m3u8' }
+    ]
+  })`, ctx);
+  vm.runInContext(`items = ${JSON.stringify([
+    { id: 'c', url: M2, type: 'hls', mime: 'application/vnd.apple.mpegurl', size: 500, title: '码率测试', host: 'cdn.example', frameId: 0, from: 'network', ts: Date.now() }
+  ])}`, ctx);
+  vm.runInContext('renderSources()', ctx);
+  const hlsCard = nodes.get('src-list').children[0];
+  const hlsOps = hlsCard.children[hlsCard.children.length - 1];
+  const hlsSel = hlsOps.children.find((c) => c.tagName === 'select');
+  const o0 = hlsSel.children[0].textContent;
+  const o1 = hlsSel.children[1].textContent;
+  ok(/H\.264/.test(o0), '下拉档位带编码器名', o0);
+  ok(/HEVC/.test(o1), 'HEVC 档位同样标注', o1);
+  ok(/≈155\.6 MB/.test(o0), '档位带按时长×码率的估算体积', o0);
+  ok(/≈155\.6 MB/.test(textOf(hlsCard)), '卡片 meta 显示 ≈ 体积', textOf(hlsCard));
+  ok(!/≈/.test(textOf(nodes.get('src-list').children[0]).split('≈155.6 MB')[0].split('已录')), '前缀 ≈ 只用于估算值');
+
+  // 换档位后 meta 的估算体积跟着变：720p → 600×832000/8 = 62400000 B = 59.5 MB
+  hlsSel.value = '1';
+  await hlsSel.dispatch('change');
+  ok(/≈59\.5 MB/.test(textOf(hlsCard)), '切换档位后估算体积随码率更新', textOf(hlsCard));
+}
+
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');
 process.exit(fail ? 1 : 0);

@@ -360,6 +360,43 @@ function codecRank(codecs) {
   return 4;
 }
 
+/** 编码器的短名，用于在下拉里区分同分辨率的两路流 */
+function shortCodec(codecs) {
+  const c = String(codecs || '').toLowerCase();
+  if (/avc1|avc3/.test(c)) return 'H.264';
+  if (/hvc1|hev1/.test(c)) return 'HEVC';
+  if (/vp09|vp9/.test(c)) return 'VP9';
+  if (/av01/.test(c)) return 'AV1';
+  return '';
+}
+
+/** 直链取实际大小；HLS master 按时长 × 档位码率估算（返回 0 表示没有依据） */
+function estSizeOf(opt) {
+  const it = opt && opt.item;
+  if (!it) return 0;
+  if (it.type === 'file') return it.size || 0;
+  if (it.type !== 'hls') return 0;
+  const p = probeCache.get(it.url);
+  if (!p || !p.ok || p.type !== 'master' || !p.duration) return 0;
+  const v = opt.variant != null ? (p.variants || [])[opt.variant] : null;
+  const bw = (v && v.bandwidth) || 0;
+  return bw ? (p.duration * bw) / 8 : 0;
+}
+
+/** 路径尾段：同名卡片靠它分辨 */
+function pathTail(u) {
+  try {
+    const x = new URL(u);
+    const seg = x.pathname.split('/').filter(Boolean);
+    let s = seg.length ? seg[seg.length - 1] : '';
+    try { s = decodeURIComponent(s); } catch (e) {}
+    if (s.length > 24) s = '…' + s.slice(-23);
+    return s;
+  } catch (e) {
+    return '';
+  }
+}
+
 /**
  * 同一分辨率的多套编码只留一个选项。
  * Reddit 这类站点 720p 会同时给 H.264 与 VP9 两路，下拉里重复出现只会让人选错。
@@ -390,10 +427,16 @@ function buildOptions(group) {
       const vs = raw ? dedupeVariants(raw) : null;
       const ok = p && p.ok;
       if (vs && vs.length > 1) {
+        const dur = p.duration || 0;
         vs.forEach((v, i) => {
           const h = variantHeight(v);
+          const parts = [v.label || (h ? h + 'p' : t('quality.n', { n: i + 1 }))];
+          const codec = shortCodec(v.codecs);
+          if (codec) parts.push(codec);
+          const est = dur && v.bandwidth ? (dur * v.bandwidth) / 8 : 0;
+          if (est) parts.push('≈' + fmtSize(est));
           opts.push({
-            label: (v.label || (h ? h + 'p' : t('quality.n', { n: i + 1 }))) + ' · HLS',
+            label: parts.join(' · ') + ' · HLS',
             item: it,
             variant: v.index != null ? v.index : i,
             uri: v.uri || '',
@@ -486,6 +529,17 @@ function renderSources() {
   }
   for (const g of groups) g.options = buildOptions(g);
 
+  // 同页出现多张同名卡片（title 相同，或都没名字只剩同一个 host）时，
+  // 光看卡片分不出哪张是哪张，给每张补上路径尾段
+  const titleCount = new Map();
+  for (const g of groups) {
+    const k = String(g.items[0].title || hostOf(g.items[0].url) || '').trim().toLowerCase();
+    titleCount.set(k, (titleCount.get(k) || 0) + 1);
+  }
+  for (const g of groups) {
+    g.ambiguous = (titleCount.get(String(g.items[0].title || hostOf(g.items[0].url) || '').trim().toLowerCase()) || 0) > 1;
+  }
+
   groups.sort((a, b) => {
     const aBlob = a.items.every((x) => x.type === 'blob') ? 1 : 0;
     const bBlob = b.items.every((x) => x.type === 'blob') ? 1 : 0;
@@ -568,6 +622,21 @@ function groupCard(group, opts = {}) {
   if (dur) meta.appendChild(el('span', 'dot', fmtDuration(dur)));
   const idm = /\/(\d{8,})(?:\/|$)/.exec(first.url);
   if (idm) meta.appendChild(el('span', 'dot', '#' + idm[1].slice(-6)));
+  // 体积：直链是实际大小，HLS 按码率估算（前缀 ≈）；换档位时跟着更新
+  let estEl = null;
+  const estText = (o) => {
+    const n = estSizeOf(o);
+    return n ? (o.item.type === 'file' ? '' : '≈') + fmtSize(n) : '';
+  };
+  if (estText(opt)) {
+    estEl = el('span', 'dot', estText(opt));
+    estEl.title = t('meta.estTip');
+    meta.appendChild(estEl);
+  }
+  if (group.ambiguous) {
+    const tail = pathTail(first.url);
+    if (tail) meta.appendChild(el('span', 'dot', tail));
+  }
   if (audioOnly) meta.appendChild(el('span', 'dot', t('meta.audioOnly')));
   if (opt.item.type === 'blob') {
     const bi = blobInfo.get(opt.item.recId);
@@ -610,6 +679,7 @@ function groupCard(group, opts = {}) {
     tagEl.className = 'tag ' + cls;
     tagEl.textContent = txt;
     btn.textContent = btnText(o);
+    if (estEl) estEl.textContent = estText(o);
   }
 
   if (sel) {
