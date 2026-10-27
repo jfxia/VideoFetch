@@ -911,6 +911,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
             break;
           }
+          case 'probe-size': {
+            // 直链源没拿到 content-length 的，HEAD/Range 补一次，结果回写媒体条目
+            await ensureOffscreen();
+            const psk = 'probe-size:' + uid();
+            const psref = await applyReferer(psk, msg.url, msg.pageUrl);
+            try {
+              const r = await chrome.runtime.sendMessage({
+                target: 'offscreen', type: 'probe-size', url: msg.url,
+                pageUrl: msg.pageUrl, referer: psref.referer, refererMode: psref.mode
+              }).catch((e) => ({ ok: false, error: String(e) }));
+              if (r && r.ok && r.size && msg.tabId != null) {
+                const mm = mediaByTab.get(msg.tabId);
+                const it = mm && mm.get(normKey(msg.url));
+                if (it && !it.size) {
+                  it.size = r.size;
+                  await persistTab(msg.tabId);
+                }
+              }
+              sendResponse(r || { ok: false });
+            } finally {
+              await releaseReferer(psk);
+            }
+            break;
+          }
           case 'blob-info': {
             const r = await chrome.tabs.sendMessage(msg.tabId, {
               target: 'cs', type: 'blob-info', recId: msg.recId

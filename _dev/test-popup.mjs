@@ -605,5 +605,43 @@ console.log('\n[11] 重复源的区分参数');
   ok(/≈59\.5 MB/.test(textOf(hlsCard)), '切换档位后估算体积随码率更新', textOf(hlsCard));
 }
 
+/* ---------- 12. 无大小的直链自动探测补齐 ---------- */
+console.log('\n[12] 无大小的直链自动探测补齐');
+{
+  const origSend = ctx.chrome.runtime.sendMessage;
+  ctx.chrome.runtime.sendMessage = async (m) => {
+    sent.push(m);
+    if (m && m.type === 'probe-size') return { ok: true, size: 6200000 };
+    return origSend(m);
+  };
+  // 微博形态：同一视频两档码率，标题相同，content-length 都没给
+  const NB = 'https://f.video.weibocdn.com/002AAA/N601041200pwTf0E010.mp4?label=mp4_ld&ssig=AAA';
+  const WB = 'https://f.video.weibocdn.com/002AAA/g001041200GAvd0E010.mp4?label=mp4_hd&ssig=BBB';
+  vm.runInContext(`items = ${JSON.stringify([
+    { id: 'n1', url: NB, type: 'file', mime: 'video/mp4', size: 0, title: '同名视频', host: 'f.video.weibocdn.com', frameId: 0, from: 'network', ts: Date.now() },
+    { id: 'n2', url: WB, type: 'file', mime: 'video/mp4', size: 0, title: '同名视频', host: 'f.video.weibocdn.com', frameId: 0, from: 'network', ts: Date.now() - 100 }
+  ])}`, ctx);
+  vm.runInContext('renderSources(); queueSizeProbes()', ctx);
+  await new Promise((r) => setTimeout(r, 40));
+  const cs = nodes.get('src-list').children;
+  ok(cs.length === 2, '两条路径不同的直链各自成卡', String(cs.length));
+  const ps = sent.filter((m) => m.type === 'probe-size');
+  ok(ps.length === 2, '两条都发起了大小探测', String(ps.length));
+  ok(ps.every((m) => m.tabId === 42), '探测带上了标签页 id');
+  const t0 = textOf(cs[0]);
+  const t1 = textOf(cs[1]);
+  ok(/5\.9 MB/.test(t0) && /5\.9 MB/.test(t1), '探测结果补成卡片大小（两卡同探同值）');
+  ok(/pwTf0E010\.mp4/.test(t0) && /GAvd0E010\.mp4/.test(t1), '同名卡片仍以路径尾段区分');
+  // 已有真实 size 的条目不再探测
+  vm.runInContext(`items = ${JSON.stringify([
+    { id: 'k1', url: 'https://cdn.example/has/size.mp4', type: 'file', mime: 'video/mp4', size: 2048, title: '有大小', host: 'cdn.example', frameId: 0, from: 'network', ts: Date.now() }
+  ])}`, ctx);
+  const before = sent.filter((m) => m.type === 'probe-size').length;
+  vm.runInContext('renderSources(); queueSizeProbes()', ctx);
+  await new Promise((r) => setTimeout(r, 20));
+  ok(sent.filter((m) => m.type === 'probe-size').length === before, '已有大小的条目不重复探测');
+  ctx.chrome.runtime.sendMessage = origSend;
+}
+
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');
 process.exit(fail ? 1 : 0);

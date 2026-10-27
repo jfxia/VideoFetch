@@ -117,6 +117,7 @@ async function init() {
   bindEvents();
   await reload();
   runProbes();
+  queueSizeProbes();
 }
 
 /**
@@ -167,6 +168,7 @@ function bindEvents() {
     probeCache.clear();
     await reload();
     runProbes();
+    queueSizeProbes();
   });
 
   $('btn-clear').addEventListener('click', async () => {
@@ -225,6 +227,7 @@ async function reload() {
   diag = r.diag || null;
   renderSources();
   renderTasks();
+  queueSizeProbes();
   if (currentView === 'diag') renderDiag();
   refreshBlobInfo();
 }
@@ -374,7 +377,7 @@ function shortCodec(codecs) {
 function estSizeOf(opt) {
   const it = opt && opt.item;
   if (!it) return 0;
-  if (it.type === 'file') return it.size || 0;
+  if (it.type === 'file') return sizeOfItem(it);
   if (it.type !== 'hls') return 0;
   const p = probeCache.get(it.url);
   if (!p || !p.ok || p.type !== 'master' || !p.duration) return 0;
@@ -457,7 +460,8 @@ function buildOptions(group) {
     } else {
       const h = heightOf(it.url);
       const ext = ((/\.([a-z0-9]{2,4})(?:[?#]|$)/i.exec(it.url) || [])[1] || 'file').toUpperCase();
-      const size = it.size ? ' · ' + fmtSize(it.size) : '';
+      const sz = sizeOfItem(it);
+      const size = sz ? ' · ' + fmtSize(sz) : '';
       opts.push({
         label: (h ? h + 'p' : t('tag.direct')) + ' · ' + ext + size,
         item: it,
@@ -497,6 +501,39 @@ function durationOf(group) {
     if (p && p.ok && p.duration) return p.duration;
   }
   return 0;
+}
+
+/* ---------------- 直链大小探测 ---------------- */
+
+const sizeCache = new Map();   // url -> 字节数（0 表示探测过但没有结果，不再重试）
+const probingSizes = new Set();
+
+/** 直链的大小：嗅探到的 content-length 优先，没有的用 HEAD/Range 探测结果补 */
+function sizeOfItem(it) {
+  return (it && it.size) || sizeCache.get(it && it.url) || 0;
+}
+
+/** 列表里有直链没带大小（微博 CDN 有时不给 content-length），主动探一次并回写后台 */
+function queueSizeProbes() {
+  const targets = items.filter(
+    (i) => i.type === 'file' && !i.size && !sizeCache.has(i.url) && !probingSizes.has(i.url)
+  );
+  if (!targets.length) return;
+  let cursor = 0;
+  const CONC = 3;
+
+  async function worker() {
+    while (cursor < targets.length) {
+      const it = targets[cursor++];
+      probingSizes.add(it.url);
+      const r = await send({ target: 'sw', type: 'probe-size', url: it.url, pageUrl: it.pageUrl, tabId });
+      const size = r && r.ok ? r.size || 0 : 0;
+      sizeCache.set(it.url, size);
+      probingSizes.delete(it.url);
+      renderSources();
+    }
+  }
+  Promise.all(new Array(Math.min(CONC, targets.length)).fill(0).map(worker));
 }
 
 function renderSources() {

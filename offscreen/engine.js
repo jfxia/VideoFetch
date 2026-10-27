@@ -1604,6 +1604,27 @@ async function probe(msg) {
 /* 启动                                                                */
 /* ------------------------------------------------------------------ */
 
+/** 直链源嗅探时没拿到 content-length 的，用 HEAD 补取大小，不认 HEAD 的退 Range */
+async function probeSize(msg) {
+  try {
+    setReferer(msg.url, msg.referer);
+    let r = await fetch(msg.url, { method: 'HEAD' });
+    let len = parseInt(r.headers && r.headers.get('content-length') || '0', 10) || 0;
+    if (!len) {
+      r = await fetch(msg.url, { headers: { Range: 'bytes=0-1' } });
+      if (r.status !== 206) return { ok: false, error: '服务器不响应大小探测' };
+      const cr = r.headers && r.headers.get('content-range');
+      const m = cr && /\/(\d+)\s*$/.exec(cr);
+      if (!m) return { ok: false, error: '响应缺少 content-range' };
+      len = +m[1];
+    }
+    if (len <= 0) return { ok: false, error: '拿不到大小' };
+    return { ok: true, size: len };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || msg.target !== 'offscreen') return;
 
@@ -1637,6 +1658,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === 'probe') {
     probe(msg).then(sendResponse);
+    return true;
+  }
+  if (msg.type === 'probe-size') {
+    probeSize(msg).then(sendResponse);
     return true;
   }
 });
