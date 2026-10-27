@@ -82,6 +82,9 @@ globalThis.chrome = {
   downloads: { download: async () => 1 },
   offscreen: { createDocument: async () => {}, hasDocument: async () => true }
 };
+// probe-size 的探测结果由用例注入，验证回写校验
+chrome.runtime.sendMessage = async (m) =>
+  m && m.type === 'probe-size' ? { ok: true, size: globalThis.__probeSize } : { ok: true };
 
 await import('../background/service-worker.js');
 
@@ -332,6 +335,28 @@ console.log('\n[7] 同路径不同签名参数的重复抓取合并为一条');
   r = await fireMsg({ target: 'sw', type: 'list', tabId: 43 });
   const mine2 = r.items.filter((i) => i.url.includes('weibocdn'));
   ok(mine2.length === 2, '大小差异过大时不合并', String(mine2.length));
+}
+
+console.log('\n[8] probe-size 回写校验：可疑小值不写入');
+{
+  fireHeaders({
+    url: 'https://f.video.weibocdn.com/o0/AbCdEf0104.mp4?ssig=X',
+    tabId: 42, type: 'xmlhttprequest', frameId: 0, initiator: 'https://x.com',
+    documentUrl: 'https://x.com/axoo_o/status/2112363173596783023',
+    responseHeaders: [{ name: 'content-type', value: 'video/mp4' }]
+  });
+  await sleep(60);
+  globalThis.__probeSize = 552; // 签名 URL 对探测返回的 552B 错误体
+  await fireMsg({ target: 'sw', type: 'probe-size', url: 'https://f.video.weibocdn.com/o0/AbCdEf0104.mp4?ssig=X', tabId: 42 });
+  let r = await fireMsg({ target: 'sw', type: 'list', tabId: 42 });
+  let hit = r.items.find((i) => i.url.includes('AbCdEf0104'));
+  ok(hit && !hit.size, '可疑小值 552 不回写', hit && String(hit.size));
+  globalThis.__probeSize = 5242880;
+  await fireMsg({ target: 'sw', type: 'probe-size', url: 'https://f.video.weibocdn.com/o0/AbCdEf0104.mp4?ssig=X', tabId: 42 });
+  r = await fireMsg({ target: 'sw', type: 'list', tabId: 42 });
+  hit = r.items.find((i) => i.url.includes('AbCdEf0104'));
+  ok(hit && hit.size === 5242880, '可信大小正常回写', hit && String(hit.size));
+  delete globalThis.__probeSize;
 }
 
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');

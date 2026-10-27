@@ -632,14 +632,24 @@ console.log('\n[12] 无大小的直链自动探测补齐');
   const t1 = textOf(cs[1]);
   ok(/5\.9 MB/.test(t0) && /5\.9 MB/.test(t1), '探测结果补成卡片大小（两卡同探同值）');
   ok(/pwTf0E010\.mp4/.test(t0) && /GAvd0E010\.mp4/.test(t1), '同名卡片仍以路径尾段区分');
-  // 已有真实 size 的条目不再探测
+  // 已有可信大小（≥24KB）的条目不再探测
   vm.runInContext(`items = ${JSON.stringify([
-    { id: 'k1', url: 'https://cdn.example/has/size.mp4', type: 'file', mime: 'video/mp4', size: 2048, title: '有大小', host: 'cdn.example', frameId: 0, from: 'network', ts: Date.now() }
+    { id: 'k1', url: 'https://cdn.example/has/size.mp4', type: 'file', mime: 'video/mp4', size: 1048576, title: '有大小', host: 'cdn.example', frameId: 0, from: 'network', ts: Date.now() }
   ])}`, ctx);
   const before = sent.filter((m) => m.type === 'probe-size').length;
   vm.runInContext('renderSources(); queueSizeProbes()', ctx);
   await new Promise((r) => setTimeout(r, 20));
   ok(sent.filter((m) => m.type === 'probe-size').length === before, '已有大小的条目不重复探测');
+
+  // 上次探测被错误体骗进来的可疑小值（552 B）视为无值，重探并用新值顶掉
+  vm.runInContext(`items = ${JSON.stringify([
+    { id: 'k2', url: 'https://f.video.weibocdn.com/002AAA/N601041200pwTf0E010.mp4?ssig=AAA', type: 'file', mime: 'video/mp4', size: 552, title: '可疑小值', host: 'f.video.weibocdn.com', frameId: 0, from: 'network', ts: Date.now() }
+  ])}`, ctx);
+  const before2 = sent.filter((m) => m.type === 'probe-size').length;
+  vm.runInContext('renderSources(); queueSizeProbes()', ctx);
+  await new Promise((r) => setTimeout(r, 30));
+  ok(sent.filter((m) => m.type === 'probe-size').length === before2 + 1, '可疑小值触发重新探测');
+  ok(!/552 B/.test(textOf(nodes.get('src-list').children[0])), '卡片不再显示 552 B', textOf(nodes.get('src-list').children[0]));
   ctx.chrome.runtime.sendMessage = origSend;
 }
 

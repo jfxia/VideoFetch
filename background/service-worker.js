@@ -921,10 +921,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 target: 'offscreen', type: 'probe-size', url: msg.url,
                 pageUrl: msg.pageUrl, referer: psref.referer, refererMode: psref.mode
               }).catch((e) => ({ ok: false, error: String(e) }));
-              if (r && r.ok && r.size && msg.tabId != null) {
+              if (r && r.ok && r.size >= 24 * 1024 && msg.tabId != null) {
                 const mm = mediaByTab.get(msg.tabId);
                 const it = mm && mm.get(normKey(msg.url));
-                if (it && !it.size) {
+                // 之前探测被错误体骗过写入的可疑小值也一并顶掉
+                if (it && (!it.size || it.size < 24 * 1024)) {
                   it.size = r.size;
                   await persistTab(msg.tabId);
                 }

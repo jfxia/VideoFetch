@@ -507,16 +507,20 @@ function durationOf(group) {
 
 const sizeCache = new Map();   // url -> 字节数（0 表示探测过但没有结果，不再重试）
 const probingSizes = new Set();
+// 低于此值的"大小"不可信：直链小于它的本来就会被后台丢弃，只可能是探测拿到的错误体
+const SIZE_MIN = 24 * 1024;
 
 /** 直链的大小：嗅探到的 content-length 优先，没有的用 HEAD/Range 探测结果补 */
 function sizeOfItem(it) {
-  return (it && it.size) || sizeCache.get(it && it.url) || 0;
+  if (!it) return 0;
+  const own = it.type === 'file' && it.size >= SIZE_MIN ? it.size : 0;
+  return own || sizeCache.get(it.url) || 0;
 }
 
 /** 列表里有直链没带大小（微博 CDN 有时不给 content-length），主动探一次并回写后台 */
 function queueSizeProbes() {
   const targets = items.filter(
-    (i) => i.type === 'file' && !i.size && !sizeCache.has(i.url) && !probingSizes.has(i.url)
+    (i) => i.type === 'file' && !sizeOfItem(i) && !sizeCache.has(i.url) && !probingSizes.has(i.url)
   );
   if (!targets.length) return;
   let cursor = 0;

@@ -1604,21 +1604,26 @@ async function probe(msg) {
 /* 启动                                                                */
 /* ------------------------------------------------------------------ */
 
-/** 直链源嗅探时没拿到 content-length 的，用 HEAD 补取大小，不认 HEAD 的退 Range */
+/** 直链源嗅探时没拿到 content-length 的，用 HEAD 补取大小，不认 HEAD 的退 Range。
+ * 签名 URL（微博 ssig 只认 GET）常回一个小错误体，必须校验类型与体量，否则把 552B 的报错当文件大小。 */
 async function probeSize(msg) {
+  const plausible = (n) => n >= 24 * 1024;
+  const ctOK = (ct) => !ct || !/text\/|json|xml|html/i.test(ct);
   try {
     setReferer(msg.url, msg.referer);
     let r = await fetch(msg.url, { method: 'HEAD' });
+    let ct = (r.headers && r.headers.get('content-type')) || '';
     let len = parseInt(r.headers && r.headers.get('content-length') || '0', 10) || 0;
+    if (!plausible(len) || !ctOK(ct)) len = 0;
     if (!len) {
       r = await fetch(msg.url, { headers: { Range: 'bytes=0-1' } });
-      if (r.status !== 206) return { ok: false, error: '服务器不响应大小探测' };
+      ct = (r.headers && r.headers.get('content-type')) || '';
+      if (r.status !== 206 || !ctOK(ct)) return { ok: false, error: '服务器不响应大小探测' };
       const cr = r.headers && r.headers.get('content-range');
       const m = cr && /\/(\d+)\s*$/.exec(cr);
-      if (!m) return { ok: false, error: '响应缺少 content-range' };
+      if (!m || !plausible(+m[1])) return { ok: false, error: '响应缺少有效的 content-range' };
       len = +m[1];
     }
-    if (len <= 0) return { ok: false, error: '拿不到大小' };
     return { ok: true, size: len };
   } catch (e) {
     return { ok: false, error: String((e && e.message) || e) };
