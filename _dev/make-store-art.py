@@ -10,6 +10,7 @@
 
 产物（store/）:
   icon-300.png                300x300  商店图标
+  screenshot-1-sources-zh.png 1280x800 源列表（中文界面）
   screenshot-1-sources-en.png 1280x800 源列表（英文界面）
   screenshot-2-tasks-zh.png   1280x800 下载任务（中文界面）
   screenshot-3-settings-en.png 1280x800 设置页（英文界面）
@@ -40,8 +41,8 @@ SHOTS = os.path.join(ROOT, '_shots')
 DOCS = os.path.join(ROOT, 'docs')
 CHROME = r'C:\Program Files\Google\Chrome\Application\chrome.exe'
 
-# README 引用的截图。store/ 只留在本机，这两张复制到 docs/ 随仓库走。
-README_SHOTS = ('screenshot-1-sources-en.png', 'screenshot-2-tasks-zh.png')
+# README 引用的截图。store/ 只留在本机，这几张复制到 docs/ 随仓库走。
+README_SHOTS = ('screenshot-1-sources-zh.png', 'screenshot-1-sources-en.png', 'screenshot-2-tasks-zh.png')
 
 SS = 8  # 超采样
 
@@ -178,6 +179,15 @@ def trim(src, dst, pad=0):
 
 FRAMES = [
     dict(
+        file='screenshot-1-sources-zh.png',
+        img='sources-zh.png',
+        eyebrow='视频源',
+        t='页面在播什么\n就下什么',
+        d='VideoFetch 找到页面真正在播的流：HLS 播放列表、直播、直链 MP4，连只以 blob 交给播放器的也能录。',
+        b='每个视频一张卡片，清晰度内置下拉|八路并发获取，合并为单个文件|分轨音频自动合回时间轴',
+        foot='VideoFetch · Manifest V3 · 数据只留在本机，不对外发送',
+    ),
+    dict(
         file='screenshot-1-sources-en.png',
         img='sources-en.png',
         eyebrow='Edge extension',
@@ -218,6 +228,7 @@ def shots(port):
     # 1) 截 popup / settings 本体
     plan = [
         ('src-en.html', 420, 600, 'sources-en.png', 0),
+        ('src-zh.html', 420, 600, 'sources-zh.png', 0),
         ('tasks-zh.html', 420, 600, 'tasks-zh.png', 0),
         ('settings-en.html', 780, 700, 'settings-en.png', 24),
     ]

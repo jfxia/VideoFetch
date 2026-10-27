@@ -8,7 +8,7 @@
 
 [发行说明](CHANGELOG.md) · [支持的站点](SUPPORTED_SITES.md)
 
-<img src="docs/screenshot-1-sources-en.png" width="720" alt="视频源列表与清晰度选择">
+<img src="docs/screenshot-1-sources-zh.png" width="720" alt="视频源列表与清晰度选择">
 
 ---
 
