@@ -28,6 +28,7 @@ const tabRemovedListeners = [];
 const tabUpdatedListeners = [];
 const badgeTexts = [];   // { tabId, text }
 const badgeColors = [];  // { tabId, color }
+const badgeTextColors = []; // { tabId, color }
 const tabs = [
   { id: 42, url: 'https://x.com/axoo_o/status/2112363173596783023', title: 'axoo on X: "测试"', active: true },
   { id: 43, url: 'https://example.com/watch', title: '示例页', active: false }
@@ -68,7 +69,8 @@ globalThis.chrome = {
   },
   action: {
     setBadgeText: async (o) => badgeTexts.push(o),
-    setBadgeBackgroundColor: async (o) => badgeColors.push(o)
+    setBadgeBackgroundColor: async (o) => badgeColors.push(o),
+    setBadgeTextColor: async (o) => badgeTextColors.push(o)
   },
   webRequest: {
     onHeadersReceived: { addListener: (fn) => headerListeners.push(fn) }
@@ -117,6 +119,12 @@ function lastBadge(tabId) {
 const lastBadgeColor = (tabId) => {
   for (let i = badgeColors.length - 1; i >= 0; i--) {
     if (badgeColors[i].tabId === tabId) return badgeColors[i].color;
+  }
+  return undefined;
+};
+const lastBadgeTextColor = (tabId) => {
+  for (let i = badgeTextColors.length - 1; i >= 0; i--) {
+    if (badgeTextColors[i].tabId === tabId) return badgeTextColors[i].color;
   }
   return undefined;
 };
@@ -219,6 +227,7 @@ console.log('\n[6] 图标角标：红点只数视频卡片');
   await sleep(30);
   ok(lastBadge(43) === '1', '有视频源时红点显示 1', 'text=' + lastBadge(43));
   ok(/^#/.test(String(lastBadgeColor(43))), '红点带背景色', String(lastBadgeColor(43)));
+  ok(lastBadgeTextColor(43) === '#FFFFFF', '红点数字为白色', String(lastBadgeTextColor(43)));
 
   // 同一视频的另一档变体：共用路径里的长数字 ID，仍是一张卡片
   fireHeaders({

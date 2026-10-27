@@ -247,6 +247,7 @@ function clearTab(tabId) {
 /* ---------------- 图标角标 ---------------- */
 
 const BADGE_COLOR = '#DE350B';
+const BADGE_TEXT_COLOR = '#FFFFFF';
 const BADGE_URL_RE = /(?:^|[\/_.-])audio(?:[\/_.-]|$)/i;
 const BADGE_EXT_RE = /\.(m4a|mp3|aac|oga|opus|flac|wav)(?:[?#]|$)/i;
 
@@ -290,7 +291,10 @@ function updateBadge(tabId) {
   const n = videoGroupCount(tabId);
   try {
     chrome.action.setBadgeText({ tabId, text: n > 0 ? String(Math.min(n, 99)) : '' });
-    if (n > 0) chrome.action.setBadgeBackgroundColor({ tabId, color: BADGE_COLOR });
+    if (n > 0) {
+      chrome.action.setBadgeBackgroundColor({ tabId, color: BADGE_COLOR });
+      chrome.action.setBadgeTextColor?.({ tabId, color: BADGE_TEXT_COLOR });
+    }
   } catch {}
 }
 
