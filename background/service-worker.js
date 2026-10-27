@@ -951,6 +951,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             sendResponse(r || { ok: false });
             break;
           }
+          case 'record-drop': {
+            // 导出完成或用户放弃后，页面侧那份录制没有留的必要：
+            // 让页面删掉落在站点磁盘区里的分片，同时撤掉列表里已经取不到数据的卡片
+            const r = await chrome.tabs.sendMessage(msg.tabId, {
+              target: 'cs', type: 'record-drop', recId: msg.recId
+            }, { frameId: msg.frameId || 0 }).catch(() => null);
+            if (msg.tabId != null && msg.recId) {
+              const m = await getTabMap(msg.tabId);
+              let hit = false;
+              for (const [k, it] of m) {
+                if (it.recId && it.recId === msg.recId) { m.delete(k); hit = true; }
+              }
+              if (hit) {
+                await persistTab(msg.tabId);
+                updateBadge(msg.tabId);
+                notifyPopup();
+              }
+            }
+            sendResponse(r || { ok: false });
+            break;
+          }
           case 'clear-tasks': {
             for (const [k, t] of tasks) {
               if (['done', 'error', 'canceled', 'interrupted'].includes(t.status)) tasks.delete(k);

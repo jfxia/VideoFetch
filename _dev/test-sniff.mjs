@@ -34,6 +34,7 @@ const tabs = [
   { id: 43, url: 'https://example.com/watch', title: '示例页', active: false }
 ];
 let queriedPatterns = [];
+const csCalls = [];   // 转发给 content script 的消息
 
 globalThis.chrome = {
   runtime: {
@@ -65,7 +66,7 @@ globalThis.chrome = {
     get: async (id) => tabs.find((t) => t.id === id) || { id, title: '' },
     onRemoved: { addListener: (fn) => tabRemovedListeners.push(fn) },
     onUpdated: { addListener: (fn) => tabUpdatedListeners.push(fn) },
-    sendMessage: async () => ({ ok: true })
+    sendMessage: async (id, m, opts) => { csCalls.push({ id, m, opts }); return { ok: true }; }
   },
   action: {
     setBadgeText: async (o) => badgeTexts.push(o),
@@ -357,6 +358,33 @@ console.log('\n[8] probe-size 回写校验：可疑小值不写入');
   hit = r.items.find((i) => i.url.includes('AbCdEf0104'));
   ok(hit && hit.size === 5242880, '可信大小正常回写', hit && String(hit.size));
   delete globalThis.__probeSize;
+}
+
+console.log('\n[9] 录制导出后撤掉页面侧数据与列表卡片');
+{
+  await fireMsg(
+    { target: 'sw', type: 'page-media', items: [
+      { url: 'https://cdn.example.com/rec/one.mp4', type: 'file', mime: 'video/mp4', recId: 'r9' },
+      { url: 'https://cdn.example.com/rec/two.mp4', type: 'file', mime: 'video/mp4' }
+    ] },
+    { tab: { id: 42, url: 'https://x.com/axoo_o/status/2112363173596783023' }, frameId: 0 }
+  );
+  await sleep(80);
+  let r = await fireMsg({ target: 'sw', type: 'list', tabId: 42 });
+  ok(r.items.some((i) => i.recId === 'r9'), '录制来源先出现在列表里');
+
+  const mark = csCalls.length;
+  await fireMsg({ target: 'sw', type: 'record-drop', tabId: 42, frameId: 0, recId: 'r9' });
+  await sleep(40);
+
+  const fwd = csCalls.slice(mark).find((c) => c.m && c.m.type === 'record-drop');
+  ok(!!fwd, '通知 content script 删页面侧分片', fwd ? JSON.stringify(fwd.m) : '未转发');
+  ok(fwd && fwd.m.recId === 'r9' && fwd.id === 42, '带对的 recId 与标签页');
+
+  r = await fireMsg({ target: 'sw', type: 'list', tabId: 42 });
+  ok(!r.items.some((i) => i.recId === 'r9'), '已导出过的录制卡片撤掉');
+  ok(r.items.some((i) => i.url.includes('rec/two.mp4')), '不相关的来源不受影响');
+  ok(lastBadge(42) !== '', '角标跟着重算', 'text=' + JSON.stringify(lastBadge(42)));
 }
 
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');

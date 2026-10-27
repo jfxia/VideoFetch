@@ -101,12 +101,55 @@
     });
   }
 
+  /**
+   * 丢掉一条录制：内存里的段、已写盘的分片、以及后续还会往里塞的数据。
+   * 录制结束（导出完成、用户放弃、页面卸载）后就该走这里，别让几 GB 的分片留在站点磁盘区。
+   */
+  function dropRec(rec) {
+    if (!rec) return;
+    rec.dead = true;
+    rec.buffers.forEach(function (b) {
+      b.dead = true;
+      b.seg = [];
+      b.segBytes = 0;
+      if (!b.spill || !b.dir) return;
+      // 等在途的写盘排完再删，否则删完又被写回来
+      b.wq.then(function () {
+        for (var j = 0; j < b.segNo; j++) {
+          (function (nm) {
+            b.dir.removeEntry(nm).catch(function () {});
+          })(b.name + j + '.bin');
+        }
+      }).catch(function () {});
+    });
+    rec.buffers.clear();
+    rec.total = 0;
+    RECS.delete(rec.id);
+  }
+
+  /** 页面要走了：所有录制都不可能再导出，一起清掉 */
+  function dropAllRecs() {
+    var list = [];
+    RECS.forEach(function (r) { list.push(r); });
+    for (var i = 0; i < list.length; i++) dropRec(list[i]);
+    STATIC_BLOBS.clear();
+  }
+
+  // 页面卸载时把分片删掉；进往返缓存（BFCache）的还会回来，内存里的录制也还在，先别动
+  try {
+    window.addEventListener('pagehide', function (e) {
+      if (e && e.persisted) return;
+      try {
+        dropAllRecs();
+      } catch (err) {}
+    });
+  } catch (e) {}
+
   function emit(kind, data) {
     try {
       window.postMessage({ __vf: 'event', kind: kind, data: data }, '*');
     } catch (e) {}
   }
-
   function absUrl(u) {
     try {
       return new URL(u, document.baseURI).href;
@@ -285,6 +328,8 @@
         var sb = origAddSB.call(this, mime);
         try {
           var rec = recFor(this);
+          // 这条录制已经导出并丢弃，别再挂新的缓冲，否则分片又会悄悄堆回磁盘
+          if (rec.dead) return sb;
           if (!rec.mime) rec.mime = mime;
           var bucket = {
             mime: mime, parts: [], size: 0,
@@ -303,7 +348,7 @@
           var origAppend = sb.appendBuffer;
           sb.appendBuffer = function (data) {
             try {
-              if (data) {
+              if (data && !bucket.dead && !rec.dead) {
                 var u8 = null;
                 if (data instanceof ArrayBuffer) {
                   u8 = new Uint8Array(data.slice(0));
@@ -513,20 +558,7 @@
       }
       if (d.cmd === 'drop') {
         var rd = RECS.get(d.recId);
-        if (rd) {
-          rd.buffers.forEach(function (b2) {
-            if (b2.spill && b2.dir) {
-              b2.wq.then(function () {
-                for (var j = 0; j < b2.segNo; j++) {
-                  (function (nm) {
-                    b2.dir.removeEntry(nm).catch(function () {});
-                  })(b2.name + j + '.bin');
-                }
-              }).catch(function () {});
-            }
-          });
-        }
-        RECS.delete(d.recId);
+        if (rd) dropRec(rd);
         STATIC_BLOBS.delete(d.recId);
         return reply({ ok: true });
       }

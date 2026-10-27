@@ -137,15 +137,16 @@ node _dev/serve.mjs 8898        # 夹具在 http://127.0.0.1:8898/player.html
 node _dev/test-e2e.mjs          #  38  解析 / 转封装 / 解密
 node _dev/test-engine.mjs       #  62  引擎全流程（mock chrome API）
 node _dev/test-merge.mjs        #  41  fMP4 音轨合并
-node _dev/test-popup.mjs        #  77  源列表、档位选择、任务卡按钮、英文界面
+node _dev/test-popup.mjs        #  95  源列表、档位选择、任务卡按钮、英文界面
 node _dev/test-settings.mjs     #  82  子目录规整、设置读写、词表对齐、写自定义文件夹
-node _dev/test-sniff.mjs        #  11  后台嗅探与归属
-node _dev/test-inject.mjs       #   8  页面 hook（vm 沙箱）
+node _dev/test-sniff.mjs        #  34  后台嗅探、归属与角标
+node _dev/test-inject.mjs       #  32  页面 hook（vm 沙箱）
 node _dev/test-referer.mjs      #  23  防盗链决策（假 fetch）
 node _dev/test-pause.mjs        #  82  暂停 / 继续 / 快照保存（慢速夹具）
+node _dev/test-store.mjs        #  25  临时存储与清理（内存版 OPFS）
 ```
 
-合计 424 项断言。右侧数字为该套件的断言条数。夹具为 ffmpeg 生成的真实媒体，另有一组取自线上 HLS 的 CMAF 分片，用于覆盖「分离音轨合并」这条路径。
+合计 514 项断言。右侧数字为该套件的断言条数。夹具为 ffmpeg 生成的真实媒体，另有一组取自线上 HLS 的 CMAF 分片，用于覆盖「分离音轨合并」这条路径。
 
 ## 已知限制
 
@@ -157,7 +158,7 @@ node _dev/test-pause.mjs        #  82  暂停 / 继续 / 快照保存（慢速�
 - **暂停状态存在扩展后台环境中**：断点数据存于 offscreen 的内存与 OPFS，重新加载扩展后失效，任务需重新开始
 - **源识别依赖页面加载**：安装或重新加载扩展后需刷新页面
 - **自定义文件夹只在设置页选一次**：目录选择器需要用户手势，popup 失焦即关闭。授权失效后下载退回浏览器下载文件夹，并在任务中注明实际保存位置
-- **保存产生的是快照**：每次保存都复制一份当前进度，占用 OPFS 中的临时空间，任务本身不结束
+- **保存产生的是快照**：每次保存都复制一份当前进度，占用 OPFS 中的临时空间，任务本身不结束。这份副本写完三分钟后删除，下载用的临时分片则在任务结束（完成、取消、失败）后清理，暂停中的任务保留分片以便续传
 - **直链续传依赖 `Range`**：服务器不支持则从头重新下载。`moov` 位于文件尾部的 MP4 被截断后无法播放，这是容器格式决定的
 - **一次性签名的分片有时效**：部分站点的分片地址带签名，暂停过久后继续下载会失败
 

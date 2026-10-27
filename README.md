@@ -137,15 +137,16 @@ node _dev/serve.mjs 8898        # fixtures at http://127.0.0.1:8898/player.html
 node _dev/test-e2e.mjs          #  38  parsing / remuxing / decryption
 node _dev/test-engine.mjs       #  62  full engine runs against a mocked chrome API
 node _dev/test-merge.mjs        #  41  fMP4 audio merging
-node _dev/test-popup.mjs        #  77  source list, quality picker, task buttons, English UI
+node _dev/test-popup.mjs        #  95  source list, quality picker, task buttons, English UI
 node _dev/test-settings.mjs     #  82  subfolder normalisation, settings, i18n, custom folder writing
-node _dev/test-sniff.mjs        #  11  background sniffing and attribution
-node _dev/test-inject.mjs       #   8  page hooks in a VM sandbox
+node _dev/test-sniff.mjs        #  34  background sniffing, attribution and the badge
+node _dev/test-inject.mjs       #  32  page hooks in a VM sandbox
 node _dev/test-referer.mjs      #  23  referer decisions against a fake fetch
 node _dev/test-pause.mjs        #  82  pause / resume / snapshot saving on slow fixtures
+node _dev/test-store.mjs        #  25  staging and cleanup against an in-memory OPFS
 ```
 
-424 assertions in total. The number on the right of each suite is its assertion count. The fixtures are real media generated with ffmpeg, plus one CMAF set taken from a live HLS feed to cover the split-audio path.
+514 assertions in total. The number on the right of each suite is its assertion count. The fixtures are real media generated with ffmpeg, plus one CMAF set taken from a live HLS feed to cover the split-audio path.
 
 ## Known limits
 
@@ -157,7 +158,7 @@ node _dev/test-pause.mjs        #  82  pause / resume / snapshot saving on slow 
 - **Pause state lives in the background context**: the cursor is held in the offscreen document's memory and OPFS. Reloading the extension discards it, and the task has to start over
 - **Discovery requires a page load**: refresh the tab after installing or reloading the extension
 - **The custom folder is picked once in settings**: the picker needs a user gesture and the popup closes on blur. When the permission lapses, downloads fall back to the browser download folder and the task states the actual location
-- **Saving produces a snapshot**: every save copies the progress so far and occupies temporary space in OPFS. The task itself does not end
+- **Saving produces a snapshot**: every save copies the progress so far and occupies temporary space in OPFS. The task itself does not end. The copy is deleted three minutes after it is written. Staging segments go when the task ends (done, canceled or failed); a paused task keeps them so it can resume
 - **Ranged resume depends on the server**: a server that ignores `Range` means the download restarts from zero. An MP4 with `moov` at the end cannot play after truncation; the container format decides that
 - **One-time signed segments expire**: some sites sign segment URLs, and resuming after a long pause fails
 

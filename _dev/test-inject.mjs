@@ -23,6 +23,7 @@ function ok(cond, label, extra) {
 const events = [];
 const perfEntries = [];
 const msgListeners = [];   // window 'message' 监听器：测试用它向 hook 下发命令
+const winListeners = new Map(); // 其他 window 事件（pagehide 一类）
 
 function makeCtx(fetchImpl, storageMock) {
   const nav = { userAgent: 'node-test' };
@@ -43,6 +44,8 @@ function makeCtx(fetchImpl, storageMock) {
     },
     postMessage: (m) => events.push(m),
     addEventListener: (type, fn) => {
+      if (!winListeners.has(type)) winListeners.set(type, []);
+      winListeners.get(type).push(fn);
       if (type === 'message') msgListeners.push(fn);
     },
     fetch: fetchImpl,
@@ -292,6 +295,75 @@ console.log('\n[7] 无 OPFS：退回内存模式，行为与旧版一致');
   ok(info && info.info && info.info.buckets[0].spill === false, '标记为内存模式');
   const c0 = await sendCmd(ctx, 'chunk', { recId: 'r1', index: 0 });
   ok(c0 && c0.ok && c0.data && c0.data.byteLength === 3 * 1024 * 1024 && c0.last, '单段内存直接可导出');
+}
+
+/* ---------- [8] 录制结束后的清理 ---------- */
+console.log('\n[8] 录制结束：分片删掉，后续不再堆回来');
+{
+  events.length = 0;
+  msgListeners.length = 0;
+  winListeners.clear();
+  const opfs = makeOpfs();
+  const ctx = makeCtx(async () => playResponse('text/html'), opfs.storage);
+  ctx.MediaSource.prototype.addSourceBuffer = function (mime) {
+    return { appendBuffer(d) {}, MIME: mime };
+  };
+  vm.runInContext(readFileSync(new URL('../content/inject.js', import.meta.url), 'utf8'), ctx);
+  await sleep(20);
+
+  const run = (code) => vm.runInContext(code, ctx);
+  run(`
+    var ms = new MediaSource();
+    var sb = ms.addSourceBuffer('video/mp4;codecs="avc1"');
+    sb.appendBuffer(new Uint8Array(8 * 1024 * 1024).fill(7));
+  `);
+  await sleep(50);
+  ok(opfs.files.size === 1, '先写下一个分片', String(opfs.files.size));
+
+  // 页面卸载：分片应当清掉，内存里的录制也一起丢
+  for (const fn of winListeners.get('pagehide') || []) fn({ persisted: false });
+  await sleep(50);
+  ok(opfs.files.size === 0, 'pagehide 清掉盘上分片', String(opfs.files.size));
+  const gone = await sendCmd(ctx, 'info', { recId: 'r1' });
+  ok(gone && gone.ok === false, '录制已从内存移除', gone && gone.error);
+
+  // 丢弃之后再来的数据不许再落盘（页面还在播的情况）
+  run('sb.appendBuffer(new Uint8Array(9 * 1024 * 1024).fill(7))');
+  await sleep(50);
+  ok(opfs.files.size === 0, '丢弃后的追加不再产生文件', String(opfs.files.size));
+
+  // 新的 SourceBuffer 也不会重新挂上
+  const before = events.filter((e) => e.kind === 'mse-open').length;
+  run(`var sb2 = ms.addSourceBuffer('audio/mp4'); sb2.appendBuffer(new Uint8Array(9 * 1024 * 1024).fill(3));`);
+  await sleep(50);
+  ok(opfs.files.size === 0, '同一 MediaSource 上新增缓冲也不落盘', String(opfs.files.size));
+  ok(events.filter((e) => e.kind === 'mse-open').length === before, '没有为死掉的录制新建记录');
+}
+
+/* ---------- [9] 进往返缓存的页面不清理 ---------- */
+console.log('\n[9] BFCache（persisted）不误删');
+{
+  events.length = 0;
+  msgListeners.length = 0;
+  winListeners.clear();
+  const opfs = makeOpfs();
+  const ctx = makeCtx(async () => playResponse('text/html'), opfs.storage);
+  ctx.MediaSource.prototype.addSourceBuffer = function (mime) {
+    return { appendBuffer(d) {}, MIME: mime };
+  };
+  vm.runInContext(readFileSync(new URL('../content/inject.js', import.meta.url), 'utf8'), ctx);
+  await sleep(20);
+  vm.runInContext(`
+    var ms = new MediaSource();
+    var sb = ms.addSourceBuffer('video/mp4');
+    sb.appendBuffer(new Uint8Array(8 * 1024 * 1024).fill(5));
+  `, ctx);
+  await sleep(50);
+  for (const fn of winListeners.get('pagehide') || []) fn({ persisted: true });
+  await sleep(30);
+  ok(opfs.files.size === 1, '进缓存的分片保留', String(opfs.files.size));
+  const still = await sendCmd(ctx, 'info', { recId: 'r1' });
+  ok(still && still.ok && still.info.bytes === 8 * 1024 * 1024, '录制仍然可用', still && still.info && String(still.info.bytes));
 }
 
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');

@@ -9,7 +9,7 @@ import { Assembler } from '../lib/remux.js';
 import { splitFmp4, mp4TrackInfo, listTracks } from '../lib/mp4merge.js';
 import { patchInitDuration } from '../lib/mp4time.js';
 import { fetchKey, decryptAes128, parseIv, clearKeyCache } from '../lib/crypto.js';
-import { ChunkStore, cleanupAllTemp } from '../lib/store.js';
+import { ChunkStore, cleanupAllTemp, sweepTemp } from '../lib/store.js';
 import { getSave, subPath } from '../lib/settings.js';
 import { loadDirHandle, permState, writeBlobTo } from '../lib/fsdir.js';
 
@@ -865,6 +865,20 @@ function findSessionByRec(recId) {
   return null;
 }
 
+/**
+ * 导出结束（或用户放弃）后通知页面删掉这次录制的磁盘分片。
+ * 页面侧的那份只对当前页面会话有效，搬完就没有再留的理由；
+ * 一部片子动辄几 GB，留着会一直占着站点的磁盘配额。
+ */
+function dropRecording(ctl) {
+  const t = ctl && ctl.task;
+  if (!t || t.kind !== 'blob' || !t.recId || t.tabId == null) return;
+  sendMsg({
+    target: 'sw', type: 'record-drop',
+    tabId: t.tabId, frameId: t.frameId || 0, recId: t.recId
+  });
+}
+
 async function runBlob(ctl) {
   ctl.store = new ChunkStore();
   await ctl.store.init();
@@ -1180,6 +1194,9 @@ async function finalize(ctl, opts) {
     ctl.store && ctl.store.dispose();
     if (ctl.asm && ctl.asm.rawStore) ctl.asm.rawStore.dispose();
   }, 30000);
+
+  // 录制已搬进扩展这边，页面那份立刻可以撤（页面侧删完会把卡片一并撤掉）
+  dropRecording(ctl);
 }
 
 /**
@@ -1285,6 +1302,7 @@ async function drive(ctl) {
 
     if (ctl.canceled) {
       report(ctl, { status: 'canceled', speed: 0 });
+      dropRecording(ctl);
       if (ctl.store) ctl.store.dispose();
       return;
     }
@@ -1300,6 +1318,7 @@ async function drive(ctl) {
     }
     if (ctl.canceled) {
       report(ctl, { status: 'canceled', speed: 0 });
+      dropRecording(ctl);
       if (ctl.store) ctl.store.dispose();
     } else if (ctl.stop && (task.live || ctl.partialOk)) {
       // 中途停下（直播停止）：把已有部分封装保存
@@ -1546,6 +1565,7 @@ function cancelTask(taskId) {
       try {
         if (ctl.canceled) {
           report(ctl, { status: 'canceled', speed: 0 });
+          dropRecording(ctl);
           if (ctl.store) ctl.store.dispose();
         } else {
           await finalize(ctl, { partial: true });
@@ -1672,4 +1692,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 sendMsg({ target: 'sw', type: 'engine-ready' });
+// 引擎是被上次会话中断的（浏览器退出、扩展重载），盘上的残片此时无人认领
 cleanupAllTemp();
+// 之后每 10 分钟扫一遍：正常收尾由各任务的 dispose 负责，这里只收漏网的
+setInterval(() => {
+  sweepTemp().catch(() => {});
+}, 10 * 60 * 1000);
