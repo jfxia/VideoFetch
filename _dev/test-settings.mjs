@@ -325,7 +325,12 @@ console.log('\n[6] 设置页能起来（DOM 桩）');
   };
   globalThis.indexedDB = undefined;
   chrome.downloads = { showDefaultFolder() {} };
-  chrome.runtime = { getURL: (p) => p, openOptionsPage() {} };
+  const mfVer = JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf8')).version;
+  chrome.runtime = {
+    getURL: (p) => p,
+    openOptionsPage() {},
+    getManifest: () => ({ version: mfVer })
+  };
 
   I.setLang('zh');
   // 前面几节写过存储：这里先把设置恢复成默认，再跑设置页，断言才有意义
@@ -344,6 +349,9 @@ console.log('\n[6] 设置页能起来（DOM 桩）');
   ok(radios.filter((r) => r.checked).length === 1, '语言单选项只有一个被选中');
   ok(get('lang-auto').textContent.indexOf('跟随浏览器') === 0, '跟随浏览器带实际语言', get('lang-auto').textContent);
   ok(get('sub').value === 'VideoFetch', '子目录框填了默认值', get('sub').value);
+  // 版本号取自包里的 manifest，用户报问题时能直接说出装的是哪一版
+  ok(get('ver').textContent === '版本 ' + mfVer, '设置页显示版本号', get('ver').textContent);
+  ok(get('ver').hidden === false, '版本号可见');
 }
 
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');

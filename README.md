@@ -45,6 +45,7 @@ When the list stays empty, open **Diagnostics**: whether the page hooks were ins
 - **Correcting a wrong label**: Some sites label a plain AAC track as HE-AAC. A decoder follows that label, looks for data the samples never carried, and the sound comes out dull. The label is rewritten to the encoding the samples actually use while the file is written. The audio is not re-encoded
 - **Pause and resume**: Pause stops new requests to the server and leaves the segments already fetched in place. Resume continues from that point instead of starting over
 - **Saving a snapshot**: When a playable file is needed before the end, Save writes a copy of the current progress, with the percentage in its name. The original task does not end and keeps downloading
+- **Retrying a failure**: A task that errored or was interrupted offers **Retry** on its card, restarting with the same address and quality. The card is reused, so no duplicate entry is left behind
 - **Recording live**: A stream without an end marker is treated as live. It is written as it arrives and ended by **Stop & save**. A live stream has no natural end, so ending it is left to the user
 - **Encryption and hotlink checks**: Sites with encrypted segments download as usual, the key is fetched and decryption happens locally. A CDN that accepts only requests from its own pages receives that page address in the request, and a probe request is sent before the download begins to confirm the server accepts it
 
@@ -141,16 +142,16 @@ node _dev/serve.mjs 8898        # fixtures at http://127.0.0.1:8898/player.html
 node _dev/test-e2e.mjs          #  38  parsing / remuxing / decryption
 node _dev/test-engine.mjs       #  62  full engine runs against a mocked chrome API
 node _dev/test-merge.mjs        #  41  fMP4 audio merging
-node _dev/test-popup.mjs        #  95  source list, quality picker, task buttons, English UI
-node _dev/test-settings.mjs     #  82  subfolder normalisation, settings, i18n, custom folder writing
-node _dev/test-sniff.mjs        #  34  background sniffing, attribution and the badge
+node _dev/test-popup.mjs        # 101  source list, quality picker, task buttons, retry, English UI
+node _dev/test-settings.mjs     #  84  subfolder normalisation, settings, i18n, custom folder writing
+node _dev/test-sniff.mjs        #  46  background sniffing, attribution, the badge and retry
 node _dev/test-inject.mjs       #  32  page hooks in a VM sandbox
 node _dev/test-referer.mjs      #  23  referer decisions against a fake fetch
 node _dev/test-pause.mjs        #  82  pause / resume / snapshot saving on slow fixtures
 node _dev/test-store.mjs        #  25  staging and cleanup against an in-memory OPFS
 ```
 
-514 assertions in total. The number on the right of each suite is its assertion count. The fixtures are real media generated with ffmpeg, plus one CMAF set taken from a live HLS feed to cover the split-audio path.
+534 assertions in total. The number on the right of each suite is its assertion count. The fixtures are real media generated with ffmpeg, plus one CMAF set taken from a live HLS feed to cover the split-audio path.
 
 ## Known limits
 

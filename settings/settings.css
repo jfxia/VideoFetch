@@ -258,6 +258,15 @@ input[type='text']:focus {
   height: 15px;
 }
 
+/* ---------- 版本号 ---------- */
+.ver {
+  margin-top: 22px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+  user-select: text;
+}
+
 /* ---------- toast ---------- */
 .toast {
   position: fixed;

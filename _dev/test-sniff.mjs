@@ -40,7 +40,10 @@ globalThis.chrome = {
   runtime: {
     onMessage: { addListener: (fn) => messageListeners.push(fn) },
     onInstalled: { addListener: () => {} },
-    sendMessage: async () => ({ ok: true })
+    sendMessage: async () => ({ ok: true }),
+    // ensureOffscreen 会先问一遍现存的 offscreen 文档
+    getContexts: async () => [],
+    getURL: (p) => 'chrome-extension://test/' + p
   },
   storage: {
     session: {
@@ -86,6 +89,21 @@ globalThis.chrome = {
 // probe-size 的探测结果由用例注入，验证回写校验
 chrome.runtime.sendMessage = async (m) =>
   m && m.type === 'probe-size' ? { ok: true, size: globalThis.__probeSize } : { ok: true };
+
+// 预置四种任务状态，供 [10] 组测重试：下载失败、后台重启前还在跑、已完成、录制数据已清。
+// 必须放在后台模块导入之前 —— loadTasks 只在首次被调用时读存储，之后有缓存。
+sessionStore.set('vf:tasks', [
+  { id: 'rt1', kind: 'hls', title: '失败的任务', url: 'https://cdn.example.com/rt/a.m3u8',
+    pageUrl: 'https://example.com/watch', tabId: 43, frameId: 0, mime: 'application/vnd.apple.mpegurl',
+    variant: 3, variantUri: 'https://cdn.example.com/rt/720.m3u8',
+    status: 'error', error: '网络中断', progress: 12, createdAt: Date.now() - 60000 },
+  { id: 'rt2', kind: 'file', title: '后台重启前的任务', url: 'https://cdn.example.com/rt/b.mp4',
+    pageUrl: 'https://example.com/watch', tabId: 43, status: 'running', progress: 30 },
+  { id: 'rt3', kind: 'hls', title: '已完成', url: 'https://cdn.example.com/rt/c.m3u8',
+    pageUrl: 'https://example.com/watch', tabId: 43, status: 'done', progress: 100 },
+  { id: 'rt4', kind: 'blob', title: '录制已清', url: 'blob:https://example.com/1',
+    pageUrl: 'https://example.com/watch', tabId: 43, status: 'error', recId: null }
+]);
 
 await import('../background/service-worker.js');
 
@@ -385,6 +403,37 @@ console.log('\n[9] 录制导出后撤掉页面侧数据与列表卡片');
   ok(!r.items.some((i) => i.recId === 'r9'), '已导出过的录制卡片撤掉');
   ok(r.items.some((i) => i.url.includes('rec/two.mp4')), '不相关的来源不受影响');
   ok(lastBadge(42) !== '', '角标跟着重算', 'text=' + JSON.stringify(lastBadge(42)));
+}
+
+console.log('\n[10] 失败任务的重试');
+{
+  const find = (arr, id) => (arr || []).find((t) => t.id === id) || {};
+  const l0 = await fireMsg({ target: 'sw', type: 'list', tabId: 43 });
+  ok(find(l0.tasks, 'rt2').status === 'interrupted', '后台重启后跑着的任务落到「中断」', String(find(l0.tasks, 'rt2').status));
+
+  const r1 = await fireMsg({ target: 'sw', type: 'retry', taskId: 'rt1' });
+  ok(r1 && r1.ok, '失败的任务可以重试', String(r1 && r1.error));
+  const t1 = find((await fireMsg({ target: 'sw', type: 'list', tabId: 43 })).tasks, 'rt1');
+  ok(['queued', 'running'].includes(t1.status), '状态回到进行中', String(t1.status));
+  ok(!t1.error, '旧的错误文字被清掉', String(t1.error));
+  ok(t1.progress === 0 && t1.received === 0, '进度归零');
+  ok(t1.url === 'https://cdn.example.com/rt/a.m3u8', '原地址保留');
+  ok(t1.variant === 3 && /720\.m3u8$/.test(t1.variantUri), '原档位保留，不会悄悄降级', t1.variant + ' / ' + t1.variantUri);
+
+  const r2 = await fireMsg({ target: 'sw', type: 'retry', taskId: 'rt2' });
+  ok(r2 && r2.ok, '中断的任务也能重试', String(r2 && r2.error));
+
+  const r3 = await fireMsg({ target: 'sw', type: 'retry', taskId: 'rt3' });
+  ok(r3 && r3.ok === false, '已完成的任务不接受重试', String(r3 && r3.error));
+  const r4 = await fireMsg({ target: 'sw', type: 'retry', taskId: 'rt4' });
+  ok(r4 && r4.ok === false && /录制数据/.test(r4.error), '录制数据已清的任务说明原因', String(r4 && r4.error));
+  const r5 = await fireMsg({ target: 'sw', type: 'retry', taskId: 'gone' });
+  ok(r5 && r5.ok === false && /不存在/.test(r5.error), '找不到的任务给出提示', String(r5 && r5.error));
+
+  // 这些字段不进持久化，SW 重启后重试就只能退回第 0 档重新选
+  const saved = sessionStore.get('vf:tasks') || [];
+  const s1 = find(saved, 'rt1');
+  ok(s1.url && s1.variant === 3 && s1.variantUri, '持久化保留地址与档位', [s1.url, s1.variant, s1.variantUri].join(' | '));
 }
 
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');

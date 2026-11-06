@@ -35,6 +35,13 @@ function applyLang(choice) {
   VFI18N.applyDom(document);
   $('lang-auto').textContent = t('set.langAuto', { lang: langName(VFI18N.browserLang()) });
   document.title = t('set.title');
+  // 版本号取包里 manifest 的值：用户报问题时能直接说出装的是哪一版
+  let v = '';
+  try {
+    v = (chrome.runtime.getManifest() || {}).version || '';
+  } catch {}
+  $('ver').textContent = v ? t('set.version', { v }) : '';
+  $('ver').hidden = !v;
 }
 
 /* ---------------- 渲染 ---------------- */

@@ -92,7 +92,10 @@ async function saveTasks() {
       id: t.id, kind: t.kind, title: t.title, status: t.status,
       progress: t.progress, speed: t.speed, received: t.received, total: t.total,
       error: t.error, filename: t.filename, createdAt: t.createdAt, pageUrl: t.pageUrl,
-      savedTo: t.savedTo, dirName: t.dirName, saveWarn: t.saveWarn
+      savedTo: t.savedTo, dirName: t.dirName, saveWarn: t.saveWarn,
+      // 重试要用到这些：地址、档位、来源帧。少了就只能让用户回源列表重选
+      url: t.url, mime: t.mime, tabId: t.tabId, frameId: t.frameId,
+      recId: t.recId, variant: t.variant, variantUri: t.variantUri, live: !!t.live
     }));
     await chrome.storage.session.set({ 'vf:tasks': arr });
   } catch {}
@@ -837,6 +840,47 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             task.refererMode = ref.mode;
             const r = await chrome.runtime.sendMessage({ target: 'offscreen', type: 'start', task }).catch((e) => ({ ok: false, error: String(e) }));
             sendResponse({ ok: true, task, engine: r || null });
+            break;
+          }
+          case 'retry': {
+            // 用同一个 id 重新开始：引擎在收尾时已删掉旧会话，卡片也就不必再生成一张
+            const t = tasks.get(msg.taskId);
+            if (!t) {
+              sendResponse({ ok: false, error: '任务已不存在' });
+              break;
+            }
+            if (!['error', 'interrupted', 'canceled'].includes(t.status)) {
+              sendResponse({ ok: false, error: '任务尚未结束' });
+              break;
+            }
+            if (t.kind === 'blob' && !t.recId) {
+              sendResponse({ ok: false, error: '录制数据已清除，无法重试' });
+              break;
+            }
+            Object.assign(t, {
+              status: 'queued', progress: 0, received: 0, speed: 0,
+              error: '', startedAt: 0, fileSize: 0, hasAudio: false,
+              segmentsDone: 0, segmentsTotal: 0,
+              savedTo: '', dirName: '', saveWarn: false, partial: false,
+              snapAt: 0, snapSize: 0, snapProgress: 0, snapError: '',
+              retriedAt: Date.now()
+            });
+            await saveTasks();
+            await ensureOffscreen();
+            if (!offscreenAlive) {
+              t.status = 'error';
+              t.error = '后台下载引擎启动失败，请重试';
+              await saveTasks();
+              sendResponse({ ok: false, error: t.error });
+              break;
+            }
+            const ref2 = await applyReferer(t.id, t.url, t.pageUrl);
+            t.referer = ref2.referer;
+            t.refererMode = ref2.mode;
+            const rr = await chrome.runtime
+              .sendMessage({ target: 'offscreen', type: 'start', task: t })
+              .catch((e) => ({ ok: false, error: String(e) }));
+            sendResponse({ ok: true, task: t, engine: rr || null });
             break;
           }
           case 'cancel': {

@@ -1086,6 +1086,25 @@ function taskCard(task) {
       await send({ target: 'sw', type: 'cancel', taskId: task.id });
     });
     acts.appendChild(b);
+  } else if (task.status === 'error' || task.status === 'interrupted') {
+    // 失败的任务卡上给一次重来的机会，不必让用户回到源列表再点一遍
+    const rb = el('button', 'btn sm', t('btn.retry'));
+    rb.title = t('title.retryBtn');
+    rb.addEventListener('click', async () => {
+      rb.disabled = true;
+      rb.textContent = t('btn.retrying');
+      const r = await send({ target: 'sw', type: 'retry', taskId: task.id });
+      if (!r || r.ok === false) {
+        toast((r && tr(r.error)) || t('toast.retryFail'));
+        reload();
+        return;
+      }
+      if (r.engine && r.engine.ok === false) {
+        toast(t('toast.engineWarn', { e: tr(r.engine.error || '') }));
+      }
+      reload();
+    });
+    acts.appendChild(rb);
   } else if (task.status === 'done') {
     // 存进自定义文件夹时没有 downloadId，浏览器也没法替我们打开那个目录：
     // 就不放按钮了，目录名已经在副标题里

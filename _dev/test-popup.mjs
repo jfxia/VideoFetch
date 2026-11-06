@@ -458,6 +458,32 @@ console.log('\n[8] 任务卡：暂停 / 继续 / 保存');
   });
   ok(!/无音轨/.test(textOf(noFlag)), '读不到音轨时不写「无音轨」', textOf(noFlag));
   ok(!/含音轨/.test(textOf(noFlag)), '读不到音轨时也不写「含音轨」', textOf(noFlag));
+
+  /* ---- 失败卡上的「重试」 ---- */
+  const failed = render(mkTask({ status: 'error', progress: 12, speed: 0, error: '该 m3u8 没有可用清晰度' }));
+  ok(/重试/.test(labels(failed)), '失败卡带「重试」按钮', labels(failed));
+  ok(!/打开文件|打开所在文件夹/.test(labels(failed)), '失败卡不给「打开」类按钮', labels(failed));
+  ok(/没有可用清晰度/.test(textOf(failed)), '失败原因照原样显示');
+
+  sent.length = 0;
+  await findByLabel(failed, '重试').dispatch('click');
+  ok(sent.some((m) => m.type === 'retry' && m.taskId === 'tk'), '点重试发出 retry，沿用原任务 id');
+
+  const inter = render(mkTask({ status: 'interrupted', speed: 0, error: '后台已重启，断点丢失' }));
+  ok(/重试/.test(labels(inter)), '中断（后台重启）的任务同样能重试', labels(inter));
+
+  // 重试被拒（任务其实还在跑）要有提示，不能点了没反应
+  const origSend3 = ctx.chrome.runtime.sendMessage;
+  ctx.chrome.runtime.sendMessage = async (m) => {
+    sent.push(m);
+    if (m.type === 'retry') return { ok: false, error: '任务尚未结束' };
+    if (m.type === 'list') return { ok: true, items: [], tasks: [], diag: { hooked: true, hooks: [], net: {}, ignored: [] } };
+    return { ok: true };
+  };
+  const rejected = render(mkTask({ status: 'error', error: '网络中断' }));
+  await findByLabel(rejected, '重试').dispatch('click');
+  ok(/任务尚未结束/.test(nodes.get('toast').textContent), '重试被拒时说明原因', nodes.get('toast').textContent);
+  ctx.chrome.runtime.sendMessage = origSend3;
 }
 
 /* ---------- 9. 存进自定义文件夹的任务卡 ---------- */
