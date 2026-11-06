@@ -56,6 +56,26 @@ URL.revokeObjectURL = () => {};
 const muxCode = readFileSync(new URL('../vendor/mux.min.js', import.meta.url), 'utf8');
 new Function(muxCode)();
 
+/* ---------- 故障注入：统计请求次数，按需让某一次返回 500 ----------
+ * 「重试没有把已下好的段重下一遍」只能靠请求次数来证明，所以包一层 fetch。
+ * fault = { match: RegExp, times: n }：匹配的 URL 第 n 次请求返回 500
+ */
+const hits = new Map();   // url -> 请求次数
+const ranged = new Map(); // Range 头 -> 请求次数
+let fault = null;
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (url, opts) => {
+  const u = String(url);
+  const n = (hits.get(u) || 0) + 1;
+  hits.set(u, n);
+  const rg = (opts && opts.headers && opts.headers.Range) || '';
+  if (rg) ranged.set(rg, (ranged.get(rg) || 0) + 1);
+  if (fault && fault.match.test(u) && n === fault.times) {
+    return new Response('upstream boom', { status: 500, headers: { 'content-type': 'text/plain' } });
+  }
+  return realFetch(url, opts);
+};
+
 await import('../offscreen/engine.js');
 
 /* ---------- 驱动 ---------- */
@@ -469,6 +489,116 @@ console.log('\n[P6] 暂停中取消：不留悬挂会话');
   // 会话已经释放：再点继续应该被拒
   const rr = call({ target: 'offscreen', type: 'resume', taskId: 'p6' });
   ok(rr && rr.ok === false, '会话已清理，继续请求被拒', JSON.stringify(rr));
+}
+
+/* ---------- P7. 分片 500 失败 → 重试从断点继续 ---------- */
+console.log('\n[P7] HLS 分片 500 失败后重试：已下好的段不再重下');
+{
+  hits.clear();
+  ranged.clear();
+  // 并发 1：seg000/001 交付后再请求 seg002，让它在第一次就 500
+  fault = { match: /seg002\.ts/, times: 1 };
+  start({ id: 'p7', kind: 'hls', url: BASE + 'slow/index.m3u8', title: '失败续传', pageUrl: BASE, concurrency: 1 });
+
+  const u1 = await waitFor('p7', settled, 60000);
+  ok(u1.status === 'error', '分片 500 让任务失败', u1.error || '');
+  ok(/500/.test(u1.error || ''), '错误里带着状态码', u1.error || '');
+  ok((u1.segmentsDone || 0) >= 1, '失败前已经落了 ' + u1.segmentsDone + ' 段');
+  ok(u1.keepBytes > 0, '断点数据留着（' + ((u1.keepBytes || 0) / 1048576).toFixed(2) + 'MB）');
+
+  const before = lastOf('p7');
+  ok(before.status === 'error' && (before.received || 0) === u1.received, '失败后不再产生流量');
+
+  fault = null;
+  const rr = call({ target: 'offscreen', type: 'resume', taskId: 'p7' });
+  ok(rr && rr.ok, '引擎接受续传（会话没被销毁）', JSON.stringify(rr));
+
+  const u2 = await waitFor('p7', settled, 60000);
+  ok(u2.status === 'done', '续传后完成', u2.error || '');
+  ok(u2.segmentsDone === 5, '5 段齐全', String(u2.segmentsDone));
+  ok((u2.received || 0) > (u1.received || 0), '确实接着往下下了', (u2.received || 0) + ' > ' + (u1.received || 0));
+
+  const c0 = hits.get(BASE + 'hd/seg000.ts?delay=300') || 0;
+  const c1 = hits.get(BASE + 'hd/seg001.ts?delay=300') || 0;
+  ok(c0 === 1 && c1 === 1, '已交付的两段各只请求 1 次（没有重下）', 'seg000=' + c0 + ' seg001=' + c1);
+  ok((hits.get(BASE + 'hd/seg002.ts?delay=300') || 0) === 2, '失败那段重试后补了一次');
+
+  const size = await saveCaptured('pause-retry-hls.mp4');
+  tmp.push('_dev/pause-retry-hls.mp4');
+  const dur = duration('_dev/pause-retry-hls.mp4');
+  ok(Math.abs(dur - 10) < 0.6, '成片时长 ' + dur.toFixed(2) + 's（没有缺段也没有重复）');
+  const err = decodeClean('_dev/pause-retry-hls.mp4');
+  ok(!err, '完整解码无报错' + (err ? '：' + err.slice(0, 160) : ''));
+  ok(size > 1024 * 1024, '成片体积 ' + (size / 1048576).toFixed(2) + 'MB');
+}
+
+/* ---------- P8. 直链分块失败 → 重试从断点继续 ---------- */
+console.log('\n[P8] 直链 Range 分块失败后重试：已落盘的块不再重下');
+{
+  const total = 10408910;
+  hits.clear();
+  ranged.clear();
+  // 第 1 次请求是探测（bytes=0-1），第 2 次是第 1 块，让第 3 次（第 2 块）失败
+  fault = { match: /\/file\.mp4/, times: 3 };
+  start({ id: 'p8', kind: 'file', url: BASE + 'file.mp4?delay=200', title: '直链失败续传', pageUrl: BASE, concurrency: 1 });
+
+  const u1 = await waitFor('p8', settled, 60000);
+  ok(u1.status === 'error', '分块 500 让任务失败', u1.error || '');
+  ok(u1.received > 0 && u1.received < total, '失败前已下 ' + ((u1.received || 0) / 1048576).toFixed(2) + 'MB');
+  ok(u1.keepBytes > 0, '断点数据留着');
+  const kept = u1.keepBytes;
+
+  fault = null;
+  const rr = call({ target: 'offscreen', type: 'resume', taskId: 'p8' });
+  ok(rr && rr.ok, '引擎接受续传', JSON.stringify(rr));
+
+  const u2 = await waitFor('p8', settled, 90000);
+  ok(u2.status === 'done', '续传后完成', u2.error || '');
+  const size = await saveCaptured('pause-retry-file.mp4');
+  tmp.push('_dev/pause-retry-file.mp4');
+  ok(size === total, '字节数与源文件一致（没丢块也没重复）', size + ' / ' + total);
+  ok((u2.received || 0) === total, '上报字节数也对', String(u2.received));
+
+  // 第 1 块（bytes=0-4194303）只该请求一次；续传从第 2 块开始
+  const first = ranged.get('bytes=0-4194303') || 0;
+  ok(first === 1, '已落盘的第 1 块只请求 1 次（没被重下）', '请求 ' + first + ' 次');
+  ok(kept >= 4 * 1048576 - 1024, '第 1 块确实已经完整落盘', (kept / 1048576).toFixed(2) + 'MB');}
+
+/* ---------- P9. 保存失败后重试：分片不重下，只重做封装与保存 ---------- */
+console.log('\n[P9] 保存失败后重试：已经下完的分片一个都不重下');
+{
+  hits.clear();
+  const realDownload = chrome.downloads.download;
+  chrome.downloads.download = async () => {
+    throw new Error('磁盘忙');
+  };
+  start({ id: 'p9', kind: 'hls', url: BASE + 'slow/index.m3u8', title: '保存失败', pageUrl: BASE, concurrency: 4 });
+
+  const u1 = await waitFor('p9', settled, 60000);
+  ok(u1.status === 'error', '保存失败让任务报错', u1.error || '');
+  ok(/保存失败/.test(u1.error || ''), '错误说清是保存环节', u1.error || '');
+  ok(u1.segmentsDone === 5, '分片其实已经全下完了', String(u1.segmentsDone));
+  ok(u1.keepBytes > 1024 * 1024, '成片数据留着（' + ((u1.keepBytes || 0) / 1048576).toFixed(2) + 'MB）');
+  const segReq = () =>
+    [...hits].filter(([u]) => /seg00\d\.ts/.test(u)).reduce((a, [, n]) => a + n, 0);
+  const before = segReq();
+  ok(before === 5, '第一轮每段各请求 1 次', '共 ' + before + ' 次');
+
+  chrome.downloads.download = realDownload;
+  const rr = call({ target: 'offscreen', type: 'resume', taskId: 'p9' });
+  ok(rr && rr.ok, '重试被接受', JSON.stringify(rr));
+
+  const u2 = await waitFor('p9', settled, 60000);
+  ok(u2.status === 'done', '重试后保存成功', u2.error || '');
+  ok(segReq() === before, '没有任何分片被重新下载', before + ' → ' + segReq());
+
+  const size = await saveCaptured('pause-retry-save.mp4');
+  tmp.push('_dev/pause-retry-save.mp4');
+  ok(size > 1024 * 1024, '成片体积 ' + (size / 1048576).toFixed(2) + 'MB');
+  const dur = duration('_dev/pause-retry-save.mp4');
+  ok(Math.abs(dur - 10) < 0.6, '成片时长 ' + dur.toFixed(2) + 's');
+  const err = decodeClean('_dev/pause-retry-save.mp4');
+  ok(!err, '完整解码无报错' + (err ? '：' + err.slice(0, 160) : ''));
 }
 
 /* ---------- 收尾 ---------- */

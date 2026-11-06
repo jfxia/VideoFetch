@@ -17,6 +17,12 @@ const sessions = new Map(); // taskId -> ctl
 const DEFAULT_CONCURRENCY = 8;
 /** 暂停时的收尾上限：在途请求最多再等这么久，超时直接丢弃（续传重下） */
 const DRAIN_MS = 1500;
+/**
+ * 失败后断点的保留时长。
+ * 够用户看到报错、点一次「重试」，又不至于让半截文件长期占着磁盘；
+ * 到期由定时器清理，引擎重启则由 sweepTemp 兜底。
+ */
+const KEEP_MS = 15 * 60 * 1000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* 防盗链用的 Referer：按主机登记，同主机优先，取不到退回最近一次 */
@@ -60,7 +66,11 @@ function reportProgress(ctl, patch, force) {
     return;
   }
   const now = Date.now();
-  if (!force && now - lastTick < 450) return;
+  if (!force && now - lastTick < 450) {
+    // 节流期间也记在会话里：否则紧接着失败/收尾时报出去的是旧数字（已收字节会少一截）
+    Object.assign(ctl.task, patch);
+    return;
+  }
   lastTick = now;
   Object.assign(ctl.task, patch);
   sendMsg({ target: 'sw', type: 'task-update', task: { ...ctl.task } });
@@ -684,6 +694,37 @@ async function runFile(ctl) {
     await ctl.store.init();
   }
 
+  // 重试续传前先核一遍远端：文件大小变了、或者干脆不再支持 Range，
+  // 硬接着上次的偏移往后写只会拼出一个坏文件，不如老实从头来。
+  if (ctl.needVerify) {
+    ctl.needVerify = false;
+    if ((ctl.fileBytes || 0) > 0) {
+      let total = -1;
+      try {
+        const r = await fetch(url, {
+          headers: { Range: 'bytes=0-1' },
+          credentials: 'include',
+          cache: 'no-store',
+          signal: sig(ctl)
+        });
+        if (r.status === 206) {
+          const m = /\/(\d+)\s*$/.exec(r.headers.get('content-range') || '');
+          total = m ? parseInt(m[1], 10) : -1;
+        }
+      } catch (e) {
+        if (isAbort(e)) throw new PauseSignal();
+      }
+      if (!ctl.fileSize || total !== ctl.fileSize) {
+        ctl.log('远端文件与断点对不上，改为从头下载', 'warn');
+        await ctl.store.reset();
+        ctl.fileBytes = 0;
+        ctl.fileSeg = 0;
+        ctl.fileSize = total > 0 ? total : 0;
+        ctl.fileProbed = false;
+      }
+    }
+  }
+
   // 探测只做一次：续传时沿用首次拿到的长度与 Range 能力
   if (!ctl.fileProbed) {
     let size = 0;
@@ -1268,6 +1309,49 @@ function newCtl(task) {
   };
 }
 
+/**
+ * 失败后把会话与临时文件留住，等用户点「重试」时从断点接着下。
+ *
+ * 只留「有东西可留」的：数据为 0 的任务留下只是占盘；
+ * 录制任务的数据在页面侧的 SourceBuffer 里，页面一刷新就没了。
+ * 保留有期限，到期自己清，用户点「取消」也会立刻清。
+ */
+function keepForRetry(ctl) {
+  if (!ctl || ctl.canceled) return false;
+  if (ctl.task.kind === 'blob') return false;
+  // 直播是「接着录」，列表一直在滚，留着旧断点没有意义，还白占盘
+  if (ctl.task.live) return false;
+  if (!ctl.store || !ctl.store.size) return false;
+
+  // 续传前要核一遍远端：签名过期、文件换了、播放列表重排都得从头来
+  ctl.needVerify = true;
+  ctl.keepUntil = Date.now() + KEEP_MS;
+  clearTimeout(ctl.keepTimer);
+  ctl.keepTimer = setTimeout(() => {
+    ctl.keepTimer = null;
+    dropKept(ctl);
+    // 断点没了，卡片上「已存 xx」也得撤掉，否则看着像还能接着下
+    sendMsg({ target: 'sw', type: 'task-update', task: { ...ctl.task, keepBytes: 0 } });
+  }, KEEP_MS);
+  if (ctl.keepTimer && typeof ctl.keepTimer.unref === 'function') ctl.keepTimer.unref();
+  return true;
+}
+
+/** 丢弃保留的断点（到期、用户取消、或者同 id 起了新的一轮） */
+function dropKept(ctl) {
+  if (!ctl) return;
+  clearTimeout(ctl.keepTimer);
+  ctl.keepTimer = null;
+  ctl.keepUntil = 0;
+  if (sessions.get(ctl.task.id) === ctl) sessions.delete(ctl.task.id);
+  try {
+    if (ctl.store) ctl.store.dispose();
+  } catch (e) {}
+  try {
+    if (ctl.rawStore) ctl.rawStore.dispose();
+  } catch (e) {}
+}
+
 async function pipeline(ctl, resume) {
   const task = ctl.task;
   if (task.kind === 'blob') return runBlob(ctl);
@@ -1297,6 +1381,7 @@ async function drive(ctl) {
   clearKeyCache();
 
   let pausedOut = false;
+  let keepOut = false;
   try {
     await pipeline(ctl, resume);
 
@@ -1329,8 +1414,16 @@ async function drive(ctl) {
         if (ctl.store) ctl.store.dispose();
       }
     } else {
-      report(ctl, { status: 'error', error: String((e && e.message) || e), speed: 0 });
-      if (ctl.store) ctl.store.dispose();
+      // 失败也分两种：已经下到东西的，留着断点等用户点「重试」接着下；
+      // 一点数据都没有（解析失败、首片就 403）的，留着只是占盘，直接清。
+      keepOut = keepForRetry(ctl);
+      report(ctl, {
+        status: 'error',
+        error: String((e && e.message) || e),
+        speed: 0,
+        keepBytes: keepOut ? ctl.store.size : 0
+      });
+      if (!keepOut && ctl.store) ctl.store.dispose();
     }
     console.warn('[VF] 任务失败', e);
   } finally {
@@ -1351,14 +1444,21 @@ async function drive(ctl) {
     }
     ctl.resumePending = false;
     ctl.snapshotReq = false;
-    sessions.delete(task.id);
+    // 断点还留着：会话不能删，否则重试就退回「从头下」
+    if (keepOut) return;
+    // 只删自己：同 id 可能已经被新一轮顶掉
+    if (sessions.get(task.id) === ctl) sessions.delete(task.id);
   }
 }
 
 async function startTask(task) {
+  // 同一个 id 又起来一轮：上一轮留着的断点就没用了（正常流程不会走到这里，
+  // 但引擎侧重试用 start 兜底时会），先清干净再开局
+  const old = sessions.get(task.id);
+  if (old && !old.busy) dropKept(old);
   const ctl = newCtl(task);
   sessions.set(task.id, ctl);
-  report(ctl, { status: 'running', startedAt: Date.now() });
+  report(ctl, { status: 'running', startedAt: Date.now(), keepBytes: 0 });
   drive(ctl).catch((e) => console.warn('[VF] 调度异常', e));
 }
 
@@ -1393,6 +1493,10 @@ function resumeTask(taskId) {
   if (ctl.canceled) return { ok: false, error: '任务正在结束' };
 
   disarmAbort(ctl);
+  // 重试接续：撤掉「保留断点」的到期定时器，从现在起这个会话又活了
+  clearTimeout(ctl.keepTimer);
+  ctl.keepTimer = null;
+  ctl.keepUntil = 0;
 
   if (ctl.busy) {
     // 这一轮还在收尾（或者在拍快照）：停稳后立刻接着跑
@@ -1404,7 +1508,7 @@ function resumeTask(taskId) {
   ctl.pauseReq = false;
   ctl.stop = false;
   ctl.paused = false;
-  report(ctl, { status: 'running', snapAt: 0, snapSize: 0, snapProgress: 0, snapError: '' });
+  report(ctl, { status: 'running', error: '', snapAt: 0, snapSize: 0, snapProgress: 0, snapError: '', keepBytes: 0 });
   drive(ctl).catch((e) => console.warn('[VF] 续传异常', e));
   return { ok: true };
 }
@@ -1462,6 +1566,29 @@ async function armSegmentHosts(ctl, urls) {
   }
 }
 
+/** 断点作废：游标、装配器和临时文件一起清掉，回到「没下过」的状态 */
+async function resetHlsSession(ctl) {
+  ctl.hlsPl = null;
+  ctl.vodCursor = 0;
+  ctl.vodTime = 0;
+  ctl.vodBytes = 0;
+  ctl.liveTime = 0;
+  ctl.audioTrack = null;
+  ctl.mapDone = false;
+  ctl.headPatched = 0;
+  ctl.planned = 0;
+  ctl.phase = null;
+  try {
+    if (ctl.store) await ctl.store.dispose();
+  } catch (e) {}
+  try {
+    if (ctl.rawStore) await ctl.rawStore.dispose();
+  } catch (e) {}
+  ctl.store = null;
+  ctl.rawStore = null;
+  ctl.asm = null;
+}
+
 async function startHls(ctl, resume) {
   const task = ctl.task;
   let playlistUrl = ctl.playlistUrl || task.url;
@@ -1477,6 +1604,22 @@ async function startHls(ctl, resume) {
       ctl.log('播放列表刷新失败，沿用上次解析结果：' + e.message, 'warn');
     }
     if (!pl) pl = ctl.hlsPl;
+
+    // 重试可能隔了十几分钟：列表一旦被重排，断点索引就会错位，
+    // 拼出来的成片缺段、花屏。段数或总时长对不上就作废，宁可重下。
+    if (ctl.needVerify) {
+      ctl.needVerify = false;
+      const old = ctl.hlsPl;
+      const durOf = (x) => x.segments.reduce((a, s) => a + (s.duration || 0), 0);
+      const o = durOf(old);
+      const n = durOf(pl);
+      const drifted = old.segments.length !== pl.segments.length || (o > 0 && Math.abs(n - o) / o > 0.01);
+      if (drifted) {
+        ctl.log('播放列表已变化，断点作废，从头下载', 'warn');
+        await resetHlsSession(ctl);
+        return startHls(ctl, false);
+      }
+    }
     ctl.hlsPl = pl;
   } else {
     pl = await loadPlaylist(playlistUrl, task.pageUrl, sig(ctl));
@@ -1545,6 +1688,8 @@ async function startHls(ctl, resume) {
 function cancelTask(taskId) {
   const ctl = sessions.get(taskId);
   if (!ctl) return;
+  clearTimeout(ctl.keepTimer);
+  ctl.keepTimer = null;
   ctl.stop = true;
   ctl.pauseReq = false;
   ctl.snapshotReq = false;

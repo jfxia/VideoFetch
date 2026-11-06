@@ -1008,8 +1008,13 @@ function taskCard(task) {
     left.style.whiteSpace = 'nowrap';
     left.style.overflow = 'hidden';
     left.style.textOverflow = 'ellipsis';
-    left.style.maxWidth = '250px';
-    right.textContent = '';
+    // 断点还在：告诉用户重试不必从头下。保留期过了引擎会清掉，这里也就不再显示
+    left.style.maxWidth = task.keepBytes ? '170px' : '250px';
+    right.textContent = task.keepBytes ? t('sub.resumable', { s: fmtSize(task.keepBytes) }) : '';
+    if (task.keepBytes) {
+      right.className = 'resumable';
+      right.title = t('title.resumable');
+    }
   } else {
     left.textContent = task.received ? fmtSize(task.received) : '';
     right.textContent = statusText(task.status);
@@ -1088,8 +1093,9 @@ function taskCard(task) {
     acts.appendChild(b);
   } else if (task.status === 'error' || task.status === 'interrupted') {
     // 失败的任务卡上给一次重来的机会，不必让用户回到源列表再点一遍
-    const rb = el('button', 'btn sm', t('btn.retry'));
-    rb.title = t('title.retryBtn');
+      const rb = el('button', 'btn sm', t('btn.retry'));
+      // 断点还在时点下去是接着下，别让提示语写着「重新下载」把人误导回从头
+      rb.title = task.keepBytes ? t('title.retryBtn') : t('title.retryFresh');
     rb.addEventListener('click', async () => {
       rb.disabled = true;
       rb.textContent = t('btn.retrying');

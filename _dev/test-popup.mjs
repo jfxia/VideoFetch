@@ -472,6 +472,16 @@ console.log('\n[8] 任务卡：暂停 / 继续 / 保存');
   const inter = render(mkTask({ status: 'interrupted', speed: 0, error: '后台已重启，断点丢失' }));
   ok(/重试/.test(labels(inter)), '中断（后台重启）的任务同样能重试', labels(inter));
 
+  // 断点还在：副标题要说明「已存多少」，让用户知道重试不是从头再来
+  const kept = render(
+    mkTask({ status: 'error', progress: 47, received: 5.9 * 1048576, error: '网络中断', keepBytes: 5.9 * 1048576 })
+  );
+  ok(/已存/.test(textOf(kept)), '断点还在时标出已存多少', textOf(kept));
+  ok(/5\.9 MB/.test(textOf(kept)), '标的是真实体积', textOf(kept));
+  ok(/断点/.test(findByLabel(kept, '重试').title || ''), '断点还在时按钮提示「接着下」', findByLabel(kept, '重试').title);
+  const noKeep = render(mkTask({ status: 'error', error: '网络中断' }));
+  ok(!/已存/.test(textOf(noKeep)), '没有断点时不写这句', textOf(noKeep));
+
   // 重试被拒（任务其实还在跑）要有提示，不能点了没反应
   const origSend3 = ctx.chrome.runtime.sendMessage;
   ctx.chrome.runtime.sendMessage = async (m) => {

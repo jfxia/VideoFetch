@@ -843,7 +843,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             break;
           }
           case 'retry': {
-            // 用同一个 id 重新开始：引擎在收尾时已删掉旧会话，卡片也就不必再生成一张
+            // 先问引擎断点还在不在：还在就接着下（已下载的部分不重来），
+            // 不在（后台重启过、保留期过了、本来就没下到东西）才从头开始
             const t = tasks.get(msg.taskId);
             if (!t) {
               sendResponse({ ok: false, error: '任务已不存在' });
@@ -857,11 +858,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               sendResponse({ ok: false, error: '录制数据已清除，无法重试' });
               break;
             }
+            // 进度、已收字节先留着：能不能续上由引擎回话决定
             Object.assign(t, {
-              status: 'queued', progress: 0, received: 0, speed: 0,
-              error: '', startedAt: 0, fileSize: 0, hasAudio: false,
-              segmentsDone: 0, segmentsTotal: 0,
-              savedTo: '', dirName: '', saveWarn: false, partial: false,
+              status: 'queued', speed: 0,
+              error: '', savedTo: '', dirName: '', saveWarn: false, partial: false,
               snapAt: 0, snapSize: 0, snapProgress: 0, snapError: '',
               retriedAt: Date.now()
             });
@@ -877,10 +877,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             const ref2 = await applyReferer(t.id, t.url, t.pageUrl);
             t.referer = ref2.referer;
             t.refererMode = ref2.mode;
-            const rr = await chrome.runtime
-              .sendMessage({ target: 'offscreen', type: 'start', task: t })
+
+            const rs = await chrome.runtime
+              .sendMessage({ target: 'offscreen', type: 'resume', taskId: t.id })
               .catch((e) => ({ ok: false, error: String(e) }));
-            sendResponse({ ok: true, task: t, engine: rr || null });
+            const resumed = !!(rs && rs.ok);
+            if (!resumed) {
+              Object.assign(t, {
+                progress: 0, received: 0, fileSize: 0, hasAudio: false,
+                segmentsDone: 0, segmentsTotal: 0, keepBytes: 0
+              });
+              await saveTasks();
+            }
+
+            let engine = rs;
+            if (!resumed) {
+              engine = await chrome.runtime
+                .sendMessage({ target: 'offscreen', type: 'start', task: t })
+                .catch((e) => ({ ok: false, error: String(e) }));
+            }
+            sendResponse({ ok: true, task: t, resumed, engine: engine || null });
             break;
           }
           case 'cancel': {

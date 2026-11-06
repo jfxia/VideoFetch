@@ -45,7 +45,7 @@ When the list stays empty, open **Diagnostics**: whether the page hooks were ins
 - **Correcting a wrong label**: Some sites label a plain AAC track as HE-AAC. A decoder follows that label, looks for data the samples never carried, and the sound comes out dull. The label is rewritten to the encoding the samples actually use while the file is written. The audio is not re-encoded
 - **Pause and resume**: Pause stops new requests to the server and leaves the segments already fetched in place. Resume continues from that point instead of starting over
 - **Saving a snapshot**: When a playable file is needed before the end, Save writes a copy of the current progress, with the percentage in its name. The original task does not end and keeps downloading
-- **Retrying a failure**: A task that errored or was interrupted offers **Retry** on its card, restarting with the same address and quality. The card is reused, so no duplicate entry is left behind
+- **Retrying a failure**: A task that errored or was interrupted offers **Retry** on its card. What is already downloaded is kept for fifteen minutes and the retry continues from there, with the card showing how much is held. When the failure happened at the finishing stage (remuxing or saving), only that step is redone — no segment is fetched twice. Before resuming, the remote file size and playlist are checked again; if either has changed, the partial data is discarded and the download starts over
 - **Recording live**: A stream without an end marker is treated as live. It is written as it arrives and ended by **Stop & save**. A live stream has no natural end, so ending it is left to the user
 - **Encryption and hotlink checks**: Sites with encrypted segments download as usual, the key is fetched and decryption happens locally. A CDN that accepts only requests from its own pages receives that page address in the request, and a probe request is sent before the download begins to confirm the server accepts it
 
@@ -142,16 +142,16 @@ node _dev/serve.mjs 8898        # fixtures at http://127.0.0.1:8898/player.html
 node _dev/test-e2e.mjs          #  38  parsing / remuxing / decryption
 node _dev/test-engine.mjs       #  62  full engine runs against a mocked chrome API
 node _dev/test-merge.mjs        #  41  fMP4 audio merging
-node _dev/test-popup.mjs        # 101  source list, quality picker, task buttons, retry, English UI
+node _dev/test-popup.mjs        # 105  source list, quality picker, task buttons, retry, English UI
 node _dev/test-settings.mjs     #  84  subfolder normalisation, settings, i18n, custom folder writing
-node _dev/test-sniff.mjs        #  46  background sniffing, attribution, the badge and retry
+node _dev/test-sniff.mjs        #  49  background sniffing, attribution, the badge and retry
 node _dev/test-inject.mjs       #  32  page hooks in a VM sandbox
 node _dev/test-referer.mjs      #  23  referer decisions against a fake fetch
-node _dev/test-pause.mjs        #  82  pause / resume / snapshot saving on slow fixtures
+node _dev/test-pause.mjs        # 116  pause / resume / snapshot saving / retry from a kept breakpoint
 node _dev/test-store.mjs        #  25  staging and cleanup against an in-memory OPFS
 ```
 
-534 assertions in total. The number on the right of each suite is its assertion count. The fixtures are real media generated with ffmpeg, plus one CMAF set taken from a live HLS feed to cover the split-audio path.
+575 assertions in total. The number on the right of each suite is its assertion count. The fixtures are real media generated with ffmpeg, plus one CMAF set taken from a live HLS feed to cover the split-audio path.
 
 ## Known limits
 
@@ -160,10 +160,10 @@ node _dev/test-store.mjs        #  25  staging and cleanup against an in-memory 
 - **Blob recording captures what has played** and cannot be paused. The data goes to the browser's private disk area for the site, so size is no longer capped in practice (browser disk quota applies). Environments without that area fall back to memory with an about 400 MB cap
 - **A live stream needs a manual stop**: recording runs until **Stop & save** is pressed. Pausing a live task loses whatever was not captured
 - **Separate audio tracks are not merged for live**: the result may be silent
-- **Pause state lives in the background context**: the cursor is held in the offscreen document's memory and OPFS. Reloading the extension discards it, and the task has to start over
+- **Breakpoints live in the background context**: the cursor for a paused task, and the breakpoint kept for fifteen minutes after a failure, are held in the offscreen document's memory and OPFS. Reloading the extension discards them, and the task has to start over
 - **Discovery requires a page load**: refresh the tab after installing or reloading the extension
 - **The custom folder is picked once in settings**: the picker needs a user gesture and the popup closes on blur. When the permission lapses, downloads fall back to the browser download folder and the task states the actual location
-- **Saving produces a snapshot**: every save copies the progress so far and occupies temporary space in OPFS. The task itself does not end. The copy is deleted three minutes after it is written. Staging segments go when the task ends (done, canceled or failed); a paused task keeps them so it can resume
+- **Saving produces a snapshot**: every save copies the progress so far and occupies temporary space in OPFS. The task itself does not end. The copy is deleted three minutes after it is written. Staging segments go when the task finishes or is canceled; a paused task, and a failed one within fifteen minutes, keeps them so it can resume
 - **Ranged resume depends on the server**: a server that ignores `Range` means the download restarts from zero. An MP4 with `moov` at the end cannot play after truncation; the container format decides that
 - **One-time signed segments expire**: some sites sign segment URLs, and resuming after a long pause fails
 

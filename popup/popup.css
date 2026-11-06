@@ -421,6 +421,12 @@ select.variant:focus {
   color: var(--blob);
 }
 
+/* 失败但断点还留着：绿色小字，提示「重试能接着下」而不是从头再来 */
+.task .sub .resumable {
+  color: var(--file);
+  white-space: nowrap;
+}
+
 /* 暂停：进度条变灰停住，百分比用主色，一眼能看出是「停住了」而不是「卡住了」 */
 .task .bar.paused > i {
   background: var(--text-3);

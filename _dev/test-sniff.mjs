@@ -87,8 +87,17 @@ globalThis.chrome = {
   offscreen: { createDocument: async () => {}, hasDocument: async () => true }
 };
 // probe-size 的探测结果由用例注入，验证回写校验
-chrome.runtime.sendMessage = async (m) =>
-  m && m.type === 'probe-size' ? { ok: true, size: globalThis.__probeSize } : { ok: true };
+// resume 的结果也由用例控制：引擎还留着断点就返回 ok，否则表示会话已经没了
+globalThis.__canResume = false;
+chrome.runtime.sendMessage = async (m) => {
+  if (m && m.type === 'probe-size') return { ok: true, size: globalThis.__probeSize };
+  if (m && m.type === 'resume') {
+    return globalThis.__canResume
+      ? { ok: true }
+      : { ok: false, error: '任务已不在后台，请重新开始下载' };
+  }
+  return { ok: true };
+};
 
 // 预置四种任务状态，供 [10] 组测重试：下载失败、后台重启前还在跑、已完成、录制数据已清。
 // 必须放在后台模块导入之前 —— loadTasks 只在首次被调用时读存储，之后有缓存。
@@ -411,17 +420,25 @@ console.log('\n[10] 失败任务的重试');
   const l0 = await fireMsg({ target: 'sw', type: 'list', tabId: 43 });
   ok(find(l0.tasks, 'rt2').status === 'interrupted', '后台重启后跑着的任务落到「中断」', String(find(l0.tasks, 'rt2').status));
 
+  // 引擎那边断点还在：重试接着下，进度不清零
+  globalThis.__canResume = true;
   const r1 = await fireMsg({ target: 'sw', type: 'retry', taskId: 'rt1' });
   ok(r1 && r1.ok, '失败的任务可以重试', String(r1 && r1.error));
+  ok(r1.resumed === true, '断点还在，选择续传而不是重下', String(r1 && r1.resumed));
   const t1 = find((await fireMsg({ target: 'sw', type: 'list', tabId: 43 })).tasks, 'rt1');
   ok(['queued', 'running'].includes(t1.status), '状态回到进行中', String(t1.status));
   ok(!t1.error, '旧的错误文字被清掉', String(t1.error));
-  ok(t1.progress === 0 && t1.received === 0, '进度归零');
+  ok(t1.progress === 12, '进度保留，不从 0 重来', String(t1.progress));
   ok(t1.url === 'https://cdn.example.com/rt/a.m3u8', '原地址保留');
   ok(t1.variant === 3 && /720\.m3u8$/.test(t1.variantUri), '原档位保留，不会悄悄降级', t1.variant + ' / ' + t1.variantUri);
 
+  // 引擎那边会话已经没了（后台重启过）：只能从头再来，进度归零
+  globalThis.__canResume = false;
   const r2 = await fireMsg({ target: 'sw', type: 'retry', taskId: 'rt2' });
   ok(r2 && r2.ok, '中断的任务也能重试', String(r2 && r2.error));
+  ok(r2.resumed === false, '会话随后台重启消失，改走重下', String(r2 && r2.resumed));
+  const t2 = find((await fireMsg({ target: 'sw', type: 'list', tabId: 43 })).tasks, 'rt2');
+  ok(t2.progress === 0 && t2.received === 0, '这种情况进度归零', String(t2.progress));
 
   const r3 = await fireMsg({ target: 'sw', type: 'retry', taskId: 'rt3' });
   ok(r3 && r3.ok === false, '已完成的任务不接受重试', String(r3 && r3.error));
