@@ -254,6 +254,11 @@ console.log('\n[5] 被丢弃的可疑请求要留证');
 
 console.log('\n[6] 图标角标：红点只数视频卡片');
 {
+  // 先按真实顺序走一遍页面装载：文档标识记下来，后面的换页才有"上一页"可比
+  const [onUpdated] = tabUpdatedListeners;
+  onUpdated(43, { status: 'loading', url: 'https://example.com/watch' });
+  await sleep(20);
+
   // [1] 已给 tab 43 归档了 1 条 hls（index.m3u8，路径无长数字 ID，自成一卡）
   await sleep(30);
   ok(lastBadge(43) === '1', '有视频源时红点显示 1', 'text=' + lastBadge(43));
@@ -304,11 +309,22 @@ console.log('\n[6] 图标角标：红点只数视频卡片');
   await sleep(60);
   ok(lastBadge(43) === '3', '红点变为 3', 'text=' + lastBadge(43));
 
-  // 跨站跳转清空列表，红点随之消失（第一次回调只记录当前 URL）
-  const [onUpdated] = tabUpdatedListeners;
-  onUpdated(43, { url: 'https://example.com/watch' });
-  onUpdated(43, { url: 'https://example.org/another' });
-  await sleep(30);
+  // 同源换页：路径变了就是另一个页面，上一次的结果不能留
+  onUpdated(43, { status: 'loading', url: 'https://example.com/watch?v=2' });
+  await sleep(40);
+  ok(lastBadge(43) === '', '同站换到另一页后红点消失', 'text=' + JSON.stringify(lastBadge(43)));
+  let after = await fireMsg({ target: 'sw', type: 'list', tabId: 43 });
+  ok(after.items.length === 0, '同站换页后列表清空', 'items=' + after.items.length);
+
+  // 回到原页再攒两个源，验证跨站跳转（老用例的语义）依旧清
+  await fireMsg(
+    { target: 'sw', type: 'page-media', items: [{ url: 'https://cdn.example.net/a/11112222/1080p.mp4', type: 'file', mime: 'video/mp4' }] },
+    { tab: { id: 43, url: 'https://example.com/watch?v=2' }, frameId: 0 }
+  );
+  await sleep(60);
+  ok(lastBadge(43) === '1', '新页面的源正常入列', 'text=' + lastBadge(43));
+  onUpdated(43, { status: 'loading', url: 'https://example.org/another' });
+  await sleep(40);
   ok(lastBadge(43) === '', '跨站跳转后红点消失', 'text=' + JSON.stringify(lastBadge(43)));
 
   // 没有视频源的标签页从未被写过红点
@@ -451,6 +467,76 @@ console.log('\n[10] 失败任务的重试');
   const saved = sessionStore.get('vf:tasks') || [];
   const s1 = find(saved, 'rt1');
   ok(s1.url && s1.variant === 3 && s1.variantUri, '持久化保留地址与档位', [s1.url, s1.variant, s1.variantUri].join(' | '));
+}
+
+console.log('\n[11] 视频源只保留当前页面');
+{
+  const T = 44;
+  const senderOf = (url, frameId = 0) => ({ tab: { id: T, url }, frameId });
+  const addOne = async (url, pageUrl) => {
+    await fireMsg(
+      { target: 'sw', type: 'page-media', items: [{ url, type: 'file', mime: 'video/mp4' }] },
+      senderOf(pageUrl || 'https://spa.test/play/1')
+    );
+    await sleep(40);
+  };
+  const listOf = async (pageUrl) => {
+    const m = { target: 'sw', type: 'list', tabId: T };
+    if (pageUrl) m.pageUrl = pageUrl;
+    return fireMsg(m);
+  };
+
+  // 页面装载：主框架 hook 通报，记下这一份文档
+  await fireMsg({ target: 'sw', type: 'hook-report', data: { url: 'https://spa.test/play/1' } }, senderOf('https://spa.test/play/1'));
+  await addOne('https://cdn.spa.test/v/1/a.mp4');
+  ok((await listOf()).items.length === 1, '当前页的源正常显示');
+  ok(lastBadge(T) === '1', '红点计入当前页的源', 'text=' + lastBadge(T));
+
+  // 单页应用换路由：文档没重载，旧源退场
+  await fireMsg({ target: 'sw', type: 'page-nav', url: 'https://spa.test/play/2' }, senderOf('https://spa.test/play/2'));
+  await sleep(40);
+  ok((await listOf()).items.length === 0, '换路由后旧源不再列出');
+  ok(lastBadge(T) === '', '换路由后红点归零', 'text=' + JSON.stringify(lastBadge(T)));
+
+  // 同一地址又被播放器取一次：说明它还在用，复活
+  await addOne('https://cdn.spa.test/v/1/a.mp4', 'https://spa.test/play/2');
+  ok((await listOf()).items.length === 1, '同一地址再次上报则复活');
+
+  // 拖进度、暂停这类只改播放状态的参数不算换页
+  await fireMsg({ target: 'sw', type: 'page-nav', url: 'https://spa.test/play/2?t=42' }, senderOf('https://spa.test/play/2?t=42'));
+  await sleep(30);
+  ok((await listOf()).items.length === 1, '只改播放进度不算换页，源还在');
+  // 换了一集（真正的路由变化）
+  await fireMsg({ target: 'sw', type: 'page-nav', url: 'https://spa.test/play/2?ep=3' }, senderOf('https://spa.test/play/2?ep=3'));
+  await sleep(30);
+  ok((await listOf()).items.length === 0, '换集后旧源退场');
+
+  // 哈希分页与普通锚点的区别
+  await addOne('https://cdn.spa.test/v/2/b.mp4', 'https://spa.test/play/2?ep=3');
+  await fireMsg({ target: 'sw', type: 'page-nav', url: 'https://spa.test/play/2?ep=3#comments' }, senderOf('https://spa.test/play/2?ep=3#comments'));
+  await sleep(30);
+  ok((await listOf()).items.length === 1, '跳到页内锚点不算换页');
+  await fireMsg({ target: 'sw', type: 'page-nav', url: 'https://spa.test/play/2?ep=3#/v/9' }, senderOf('https://spa.test/play/2?ep=3#/v/9'));
+  await sleep(30);
+  ok((await listOf()).items.length === 0, '哈希路由变化算换页');
+
+  // 主框架整页换到另一个站点：不留任何旧条目
+  await fireMsg({ target: 'sw', type: 'hook-report', data: { url: 'https://other.test/x' } }, senderOf('https://other.test/x'));
+  await sleep(40);
+  ok((await listOf()).items.length === 0, '整页换站后清空');
+  ok(sessionStore.get('vf:doc:' + T) === 'https://other.test/x', '当前页面记在存储里（后台重启后仍能比对）');
+
+  // 弹窗知道当前停在哪一页：与记录不符就顺手清掉（事件漏收时的兜底）
+  await addOne('https://cdn.other.test/y.mp4', 'https://other.test/x');
+  ok((await listOf('https://other.test/x')).items.length === 1, '同页打开弹窗不清');
+  ok((await listOf('https://other.test/z')).items.length === 0, '弹窗报的页面与记录不符则清空');
+  await addOne('https://cdn.other.test/y.mp4', 'https://other.test/z');
+  ok((await listOf()).items.length === 1, '不带页面信息时不做判断，避免误清');
+
+  // iframe 里的路由变化不归这个标签页管
+  await fireMsg({ target: 'sw', type: 'page-nav', url: 'https://other.test/z?iframe=1' }, { tab: { id: T, url: 'https://other.test/z' }, frameId: 7 });
+  await sleep(30);
+  ok((await listOf('https://other.test/z')).items.length === 1, '子框架换路由不影响主页面');
 }
 
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');

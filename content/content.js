@@ -88,6 +88,11 @@
       sendToSW({ target: 'sw', type: 'hook-report', data: { url: data.url || location.href } });
       return;
     }
+    if (d.kind === 'nav') {
+      // 单页应用换了路由：后台据此决定要不要把上一页的源清掉
+      sendToSW({ target: 'sw', type: 'page-nav', url: data.url || location.href });
+      return;
+    }
     if (d.kind === 'media') {
       enqueue({
         url: data.url,

@@ -36,6 +36,10 @@ function makeCtx(fetchImpl, storageMock) {
     clearInterval: () => {},
     btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
     performance: { getEntriesByType: () => perfEntries },
+    history: {
+      pushState: () => {},
+      replaceState: () => {}
+    },
     navigator: nav,
     location: { href: 'https://x.com/axoo_o/status/2112363173596783023' },
     document: {
@@ -364,6 +368,31 @@ console.log('\n[9] BFCache（persisted）不误删');
   ok(opfs.files.size === 1, '进缓存的分片保留', String(opfs.files.size));
   const still = await sendCmd(ctx, 'info', { recId: 'r1' });
   ok(still && still.ok && still.info.bytes === 8 * 1024 * 1024, '录制仍然可用', still && still.info && String(still.info.bytes));
+}
+
+/* ---------- [10] 单页应用换路由 ---------- */
+console.log('\n[10] 换路由通报与去重集合重置');
+{
+  events.length = 0;
+  perfEntries.length = 0; // 上一个用例塞进去的资源计时段不能串到这里
+  const ctx = makeCtx(async () => playResponse('application/vnd.apple.mpegurl'));
+  vm.runInContext(readFileSync(new URL('../content/inject.js', import.meta.url), 'utf8'), ctx);
+  await ctx.fetch('https://cdn.example.com/v/1/pl.m3u8');
+  await sleep(20);
+  ok(events.filter((e) => e.kind === 'media').length === 1, '首屏捕获一条');
+  await ctx.fetch('https://cdn.example.com/v/1/pl.m3u8');
+  await sleep(20);
+  ok(events.filter((e) => e.kind === 'media').length === 1, '同一地址不重复上报');
+
+  ctx.location.href = 'https://example.com/play/2';
+  ctx.history.pushState({}, '', '/play/2');
+  await sleep(20);
+  const nav = events.find((e) => e.kind === 'nav');
+  ok(!!nav && /play\/2/.test(nav.data.url), '换路由发出 nav', nav && nav.data.url);
+
+  await ctx.fetch('https://cdn.example.com/v/1/pl.m3u8');
+  await sleep(20);
+  ok(events.filter((e) => e.kind === 'media').length === 2, '换路由后去重集合重置，能再报一次');
 }
 
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');

@@ -39,7 +39,7 @@ When the list stays empty, open **Diagnostics**: whether the page hooks were ins
 
 ## Features
 
-- **Finding the source**: Open the popup once the page has started playing and it lists the videos that page is using. Several places are watched at once, so a site that blocks one of them usually still leaves another route to the address
+- **Finding the source**: Open the popup once the page has started playing and it lists the videos that page is using. Several places are watched at once, so a site that blocks one of them usually still leaves another route to the address. The list holds the current page only: a navigation, or a route change inside a single-page app, retires what the previous page had
 - **One finished file**: Segments are assembled in playback order while the download runs, and the result is an mp4 that plays as it is, with nothing left to join
 - **Keeping the audio track**: On sites that serve picture and sound as two files, both are fetched and aligned onto one timeline, so the result does not come out silent. Live streams are the exception, see Known limits
 - **Correcting a wrong label**: Some sites label a plain AAC track as HE-AAC. A decoder follows that label, looks for data the samples never carried, and the sound comes out dull. The label is rewritten to the encoding the samples actually use while the file is written. The audio is not re-encoded
@@ -144,14 +144,14 @@ node _dev/test-engine.mjs       #  62  full engine runs against a mocked chrome 
 node _dev/test-merge.mjs        #  41  fMP4 audio merging
 node _dev/test-popup.mjs        # 105  source list, quality picker, task buttons, retry, English UI
 node _dev/test-settings.mjs     #  84  subfolder normalisation, settings, i18n, custom folder writing
-node _dev/test-sniff.mjs        #  49  background sniffing, attribution, the badge and retry
-node _dev/test-inject.mjs       #  32  page hooks in a VM sandbox
+node _dev/test-sniff.mjs        #  67  background sniffing, attribution, the badge, retry and per-page scope
+node _dev/test-inject.mjs       #  36  page hooks in a VM sandbox
 node _dev/test-referer.mjs      #  23  referer decisions against a fake fetch
 node _dev/test-pause.mjs        # 116  pause / resume / snapshot saving / retry from a kept breakpoint
 node _dev/test-store.mjs        #  25  staging and cleanup against an in-memory OPFS
 ```
 
-575 assertions in total. The number on the right of each suite is its assertion count. The fixtures are real media generated with ffmpeg, plus one CMAF set taken from a live HLS feed to cover the split-audio path.
+595 assertions in total. The number on the right of each suite is its assertion count. The fixtures are real media generated with ffmpeg, plus one CMAF set taken from a live HLS feed to cover the split-audio path.
 
 ## Known limits
 

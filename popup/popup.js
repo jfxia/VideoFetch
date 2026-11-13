@@ -165,6 +165,7 @@ function bindEvents() {
   $('btn-refresh').addEventListener('click', async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     tabId = tab ? tab.id : tabId;
+    if (tab) pageUrl = tab.url || pageUrl;
     probeCache.clear();
     await reload();
     runProbes();
@@ -217,7 +218,8 @@ function bindEvents() {
 
 async function reload() {
   if (tabId == null) return;
-  const r = await send({ target: 'sw', type: 'list', tabId });
+  // 带上当前页面地址：后台据此确认列表里没有混着上一页的结果
+  const r = await send({ target: 'sw', type: 'list', tabId, pageUrl });
   if (!r || !r.ok) {
     $('src-hint').textContent = t('err.readFail', { e: tr((r && r.error) || t('err.unknown')) });
     return;

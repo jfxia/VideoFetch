@@ -150,6 +150,41 @@
       window.postMessage({ __vf: 'event', kind: kind, data: data }, '*');
     } catch (e) {}
   }
+
+  /* ---------------- 单页应用的路由变化 ----------------
+   * 文档没有重载，但地址变了（换了一集、一个视频），上一页的嗅探结果该退场。
+   * 这里只负责通报，判定与清理都放在后台，页面侧不持有列表状态。
+   */
+  var routeWatched = false;
+  function watchRoute() {
+    if (routeWatched) return;
+    routeWatched = true;
+    var lastHref = location.href;
+    function announce() {
+      var now = location.href;
+      if (now === lastHref) return;
+      lastHref = now;
+      // 换了路由就是新页面：去重集合清空，新页面的媒体才有机会再报一次
+      reported.clear();
+      emit('nav', { url: now });
+    }
+    try {
+      ['pushState', 'replaceState'].forEach(function (name) {
+        var orig = history[name];
+        if (typeof orig !== 'function') return;
+        history[name] = function () {
+          var ret = orig.apply(this, arguments);
+          try {
+            announce();
+          } catch (e) {}
+          return ret;
+        };
+      });
+      window.addEventListener('popstate', announce);
+      window.addEventListener('hashchange', announce);
+    } catch (e) {}
+  }
+
   function absUrl(u) {
     try {
       return new URL(u, document.baseURI).href;
@@ -442,6 +477,7 @@
   // 让扩展侧知道 MAIN world 的 hook 确实装上了（诊断用）
   try {
     emit('ready', { url: location.href, href: document.baseURI });
+    watchRoute();
   } catch (e) {}
 
   /* ---------------- 导出协议 ---------------- */

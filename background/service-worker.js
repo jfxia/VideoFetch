@@ -221,6 +221,14 @@ async function addMedia(tabId, patch) {
   const key = normKey(patch.url);
   const old = m.get(key);
   if (old) {
+    // 换路由时被置为过期的条目，同一地址再次上报就是还在用，复活
+    if (old.stale) {
+      old.stale = false;
+      old.ts = Date.now();
+      await persistTab(tabId);
+      notifyPopup();
+      updateBadge(tabId);
+    }
     if (patch.mime && !old.mime) old.mime = patch.mime;
     if (patch.size && !old.size) old.size = patch.size;
     if (patch.type === 'hls' && old.type !== 'hls') old.type = 'hls';
@@ -449,21 +457,124 @@ chrome.webRequest.onHeadersReceived.addListener(
   ['responseHeaders', 'extraHeaders']
 );
 
+/* ---------------- 页面归属：只保留当前这份文档的源 ---------------- */
+
+/**
+ * 判断"是不是换页了"靠文档标识：协议 + 主机 + 路径 + 查询，锚点不算。
+ * 这里不能用内存里的上一个地址做比较——后台被回收重启后那份记录就没了，
+ * 重启后的第一次跳转会因为没有"上一页"可比而漏清，旧页面的源一直挂着。
+ * 标识写进 session 存储，跨后台重启仍在。
+ */
+const docByTab = new Map();
+const DOC_KEY_PREFIX = 'vf:doc:';
+
+function docKeyOf(url) {
+  try {
+    const u = new URL(url);
+    // 哈希只在形如 #/route、#!/route 时才算页面标识：那是靠哈希分页的应用；
+    // 普通锚点（#section）不算，点目录跳一下不该清空列表
+    const hash = /^#!?\//.test(u.hash || '') ? u.hash : '';
+    if (u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'file:') {
+      return u.origin + u.pathname.replace(/\/+$/, '') + u.search + hash;
+    }
+    return u.href.split('#')[0] + hash;
+  } catch {
+    return '';
+  }
+}
+
+async function getDocKey(tabId) {
+  if (docByTab.has(tabId)) return docByTab.get(tabId);
+  let v = '';
+  try {
+    const k = DOC_KEY_PREFIX + tabId;
+    const got = await chrome.storage.session.get(k);
+    v = (got && got[k]) || '';
+  } catch {}
+  docByTab.set(tabId, v);
+  return v;
+}
+
+async function setDocKey(tabId, key) {
+  docByTab.set(tabId, key);
+  try {
+    await chrome.storage.session.set({ [DOC_KEY_PREFIX + tabId]: key });
+  } catch {}
+}
+
+/**
+ * 只影响播放位置或来源追踪的参数：单页应用改写地址时经常夹带这些，
+ * 地址变了但页面没变，不能当成换页（拖进度、暂停都会触发 replaceState）。
+ */
+const TRANSIENT_PARAM = /^(?:t|start|time|end|autoplay|muted|list|index|continue|utm_[a-z]+|fbclid|gclid|spm|si|feature|share_source|share_medium|from|ref)$/i;
+
+function routeOf(key) {
+  try {
+    const u = new URL(key);
+    const pairs = [];
+    for (const [k, v] of u.searchParams) {
+      if (TRANSIENT_PARAM.test(k)) continue;
+      pairs.push(k + '=' + v);
+    }
+    pairs.sort();
+    const hash = /^#!?\//.test(u.hash || '') ? u.hash : '';
+    return u.origin + u.pathname.replace(/\/+$/, '') + '?' + pairs.join('&') + hash;
+  } catch {
+    return key;
+  }
+}
+
+/** 单页应用换了路由：旧条目置为过期而不是直接删，同一地址再次上报时会复活 */
+async function staleTab(tabId) {
+  const m = await getTabMap(tabId);
+  let n = 0;
+  for (const it of m.values()) {
+    if (it.stale) continue;
+    it.stale = true;
+    n++;
+  }
+  if (!n) return;
+  await persistTab(tabId);
+  notifyPopup();
+  updateBadge(tabId);
+}
+
+/**
+ * 记下这个标签页当前停在哪一页；与记录不一致就清掉上一页的结果。
+ * spa=false：整份文档重新加载，上一页的源全部作废；
+ * spa=true ：单页应用换路由，只把旧条目标为过期——同一地址再次上报时会复活，
+ *            免得把常驻播放器里仍在用的源一并抹掉；只有播放状态参数变化时不算换页。
+ */
+async function noteDocument(tabId, url, spa) {
+  if (tabId == null || tabId < 0) return false;
+  const key = docKeyOf(url);
+  if (!key) return false;
+  const prev = await getDocKey(tabId);
+  if (prev === key) return false;
+  const samePage = spa && prev && routeOf(prev) === routeOf(key);
+  await setDocKey(tabId, key);
+  if (samePage) return false;
+  if (!prev) return false; // 这个标签页头一次记，没有上一页的数据要清
+  if (spa) await staleTab(tabId);
+  else clearTab(tabId);
+  return true;
+}
+
 const lastTabUrl = new Map();
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   clearTab(tabId);
   lastTabUrl.delete(tabId);
+  docByTab.delete(tabId);
+  chrome.storage.session.remove(DOC_KEY_PREFIX + tabId).catch(() => {});
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (!changeInfo.url) return;
-  const prev = lastTabUrl.get(tabId);
-  lastTabUrl.set(tabId, changeInfo.url);
-  // 仅在真正跨站跳转时清空列表；SPA 路由变化（?v=xxx、pushState）保留已嗅探结果
-  try {
-    if (prev && new URL(prev).origin !== new URL(changeInfo.url).origin) clearTab(tabId);
-  } catch {}
+  if (changeInfo.url) lastTabUrl.set(tabId, changeInfo.url);
+  const url = changeInfo.url || (changeInfo.status === 'loading' ? lastTabUrl.get(tabId) : '');
+  // 文档重新加载才算换页；单页应用的路由变化不触发 loading，由页面里的 hook 上报
+  if (changeInfo.status !== 'loading' || !url) return;
+  noteDocument(tabId, url, false).catch(() => {});
 });
 
 /* ------------------------------------------------------------------ */
@@ -686,7 +797,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   /* ---- 来自 content script 的注入通报 ---- */
   if (msg.target === 'sw' && msg.type === 'hook-report') {
     const tabId = sender.tab ? sender.tab.id : -1;
-    if (tabId >= 0) diagHook(tabId, sender.frameId || 0, msg.data && msg.data.url);
+    if (tabId >= 0) {
+      diagHook(tabId, sender.frameId || 0, msg.data && msg.data.url);
+      // 主框架的 hook 装载等于新文档就位：上一页的结果在这里作废最可靠
+      if (!sender.frameId) noteDocument(tabId, (msg.data && msg.data.url) || sender.tab.url, false);
+    }
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  /* ---- 单页应用换路由（文档没重载，但已经是另一个页面） ---- */
+  if (msg.target === 'sw' && msg.type === 'page-nav') {
+    const tabId = sender.tab ? sender.tab.id : -1;
+    if (tabId >= 0 && !sender.frameId) noteDocument(tabId, msg.url, true);
     sendResponse({ ok: true });
     return true;
   }
@@ -782,11 +905,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           case 'list': {
             await loadTasks();
             const tabId = msg.tabId;
+            // 弹窗知道当前标签页停在哪一页：顺带核一次，事件漏收（后台被回收、
+            // 页面免注入）时也能在这里把上一页的源清掉
+            if (msg.pageUrl) await noteDocument(tabId, msg.pageUrl, false);
             const m = await getTabMap(tabId);
             // 顺手清掉历史遗留的非媒体条目（旧版本可能把 JSON 接口收了进来）
+            // 以及上一页留下、已经过期没人再上报的条目
             const items = [];
             for (const [k, it] of m) {
-              if (isJunkItem(it)) m.delete(k);
+              if (isJunkItem(it) || it.stale) m.delete(k);
               else items.push(it);
             }
             sendResponse({
