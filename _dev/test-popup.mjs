@@ -496,6 +496,37 @@ console.log('\n[8] 任务卡：暂停 / 继续 / 保存');
   ctx.chrome.runtime.sendMessage = origSend3;
 }
 
+/* ---------- 8b. 页脚总速度 ---------- */
+console.log('\n[8b] 页脚总速度：所有正在下载的任务之和');
+{
+  const foot = () => nodes.get('foot-info').textContent;
+  const mkT = (id, status, speed) => ({
+    id, title: id, status, speed, progress: 10, received: 1024, total: 10 * 1048576, createdAt: Date.now()
+  });
+  const renderAll = (arr) => {
+    vm.runInContext('tasks = ' + JSON.stringify(arr), ctx);
+    vm.runInContext('renderTasks()', ctx);
+    return foot();
+  };
+
+  const two = renderAll([mkT('a', 'running', 1048576), mkT('b', 'running', 2 * 1048576)]);
+  ok(/3\.0 MB\/s/.test(two), '两条在下载的速率相加', two);
+
+  const withPaused = renderAll([mkT('a', 'running', 1048576), mkT('b', 'paused', 5 * 1048576)]);
+  ok(/1\.0 MB\/s/.test(withPaused) && !/6\.0 MB/.test(withPaused), '暂停的任务不计入', withPaused);
+
+  const three = renderAll([
+    mkT('a', 'running', 1048576), mkT('b', 'running', 1048576), mkT('c', 'running', 1048576)
+  ]);
+  ok(/3\.0 MB\/s/.test(three), '三条累加，不只看第一条', three);
+
+  const idle = renderAll([mkT('a', 'running', 0), mkT('b', 'running', 0)]);
+  ok(!/\/s/.test(idle), '都没有速率时不说总速度', idle);
+
+  const queued = renderAll([mkT('a', 'queued', 3 * 1048576), mkT('b', 'running', 1048576)]);
+  ok(/1\.0 MB\/s/.test(queued) && !/4\.0 MB/.test(queued), '排队中的残留速率不计入', queued);
+}
+
 /* ---------- 9. 存进自定义文件夹的任务卡 ---------- */
 console.log('\n[9] 自定义文件夹：不给「打开文件夹」（浏览器打不开那个目录）');
 {

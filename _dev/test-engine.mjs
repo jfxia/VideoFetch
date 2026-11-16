@@ -411,5 +411,25 @@ console.log('\n[E12] 纯音频 HLS：存成 m4a，不冒充视频');
   ok(!err, '完整解码无报错' + (err ? '：' + err.slice(0, 160) : ''));
 }
 
+/* ---------- E13. 并发任务各自上报进度 ---------- */
+console.log('\n[E13] 并发任务：两条任务各自上报（节流不互相压掉）');
+{
+  // 同一份慢速播放列表同时下两份，各 5 段 × 1.5 秒。共用一个节流时间戳时，
+  // 一条任务会把另一条的更新压掉：旧实现里 4 秒内只有一条能报出速度。
+  start({ id: 'cc1', kind: 'hls', url: BASE + 'slow/long.m3u8', title: '并发一', pageUrl: BASE, concurrency: 1 });
+  start({ id: 'cc2', kind: 'hls', url: BASE + 'slow/long.m3u8', title: '并发二', pageUrl: BASE, concurrency: 1 });
+  await new Promise((r) => setTimeout(r, 4000));
+  const n1 = updates.filter((x) => x.id === 'cc1').length;
+  const n2 = updates.filter((x) => x.id === 'cc2').length;
+  ok(n1 >= 3 && n2 >= 3, '两条任务都持续上报', n1 + ' / ' + n2);
+  const s1 = updates.filter((x) => x.id === 'cc1').pop();
+  const s2 = updates.filter((x) => x.id === 'cc2').pop();
+  ok(s1 && s1.speed > 0 && s2 && s2.speed > 0, '两条任务都报出非零速度', (s1 && s1.speed) + ' / ' + (s2 && s2.speed));
+
+  fire({ target: 'offscreen', type: 'cancel', taskId: 'cc1' });
+  fire({ target: 'offscreen', type: 'cancel', taskId: 'cc2' });
+  await new Promise((r) => setTimeout(r, 400));
+}
+
 console.log('\n========== ' + pass + ' passed, ' + fail + ' failed ==========');
 process.exit(fail ? 1 : 0);

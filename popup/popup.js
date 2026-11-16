@@ -918,9 +918,11 @@ function renderTasks() {
     list.appendChild(taskCard(t));
   }
 
-  const running = tasks.find((t) => t.status === 'running');
-  if (running) {
-    const speed = fmtSpeed(running.speed);
+  // 总速度是所有正在下载的任务之和：只取第一条 running 会把多任务的速率当成一条
+  const running = tasks.filter((x) => x.status === 'running');
+  if (running.length) {
+    const total = running.reduce((n, x) => n + (Number(x.speed) > 0 ? Number(x.speed) : 0), 0);
+    const speed = fmtSpeed(total);
     $('foot-info').textContent =
       (active.length > 1 ? t('foot.nTasks', { n: active.length }) : '') +
       (speed ? t('foot.totalSpeed', { speed }) : t('foot.downloading'));

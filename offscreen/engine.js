@@ -57,7 +57,6 @@ function report(ctl, patch) {
   sendMsg({ target: 'sw', type: 'task-update', task: { ...ctl.task } });
 }
 
-let lastTick = 0;
 function reportProgress(ctl, patch, force) {
   // 暂停中：数字继续在内部校准（好让「已暂停」报的是真实进度），但不再推给界面。
   // 否则用户点了暂停还在看着分段数往上跳，观感就是「没停下来」。
@@ -66,12 +65,14 @@ function reportProgress(ctl, patch, force) {
     return;
   }
   const now = Date.now();
-  if (!force && now - lastTick < 450) {
+  // 节流按任务各算一份。共用一个时间戳时，并发任务会把对方的更新压掉，
+  // 界面上另一条任务的速率就一直是旧的，总速度随之忽高忽低。
+  if (!force && now - (ctl.lastTick || 0) < 450) {
     // 节流期间也记在会话里：否则紧接着失败/收尾时报出去的是旧数字（已收字节会少一截）
     Object.assign(ctl.task, patch);
     return;
   }
-  lastTick = now;
+  ctl.lastTick = now;
   Object.assign(ctl.task, patch);
   sendMsg({ target: 'sw', type: 'task-update', task: { ...ctl.task } });
 }
