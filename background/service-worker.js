@@ -312,10 +312,14 @@ function badgeGroupKey(item) {
   return item.url;
 }
 
+/** 清单类 content-type：m3u8 常以 audio/x-mpegurl 返回，那是清单格式而非音轨 */
+const PLAYLIST_MIME = /mpegurl|m3u|dash\+xml/i;
+
 /** 红点只数视频；纯音轨（按 mime 与文件名可判定时）不算 */
 function isAudioOnlyItem(item) {
   if (!item || item.type === 'blob') return false;
-  if (/^audio\//i.test(String(item.mime || ''))) return true;
+  const mt = String(item.mime || '');
+  if (/^audio\//i.test(mt) && !PLAYLIST_MIME.test(mt)) return true;
   let p = '';
   try { p = new URL(item.url).pathname; } catch { p = String(item.url || ''); }
   if (BADGE_EXT_RE.test(p)) return true;

@@ -318,6 +318,10 @@ function urlPathOf(u) {
   }
 }
 
+/** 清单类 content-type：HLS 的 m3u8 常以 audio/x-mpegurl、audio/mpegurl 返回，
+ *  那只是清单格式的名字，不代表码流里只有声音 */
+const PLAYLIST_MIME = /mpegurl|m3u|dash\+xml/i;
+
 /**
  * 纯音频源：下下来只有声音没有画面。
  * 它们在页面里和视频并列出现（Reddit 的 CMAF_AUDIO_64.mp4 / CMAF_AUDIO_128.m3u8），
@@ -325,7 +329,8 @@ function urlPathOf(u) {
  */
 function isAudioOnly(item) {
   if (!item || item.type === 'blob') return false;
-  if (/^audio\//i.test(String(item.mime || ''))) return true;
+  const mime = String(item.mime || '');
+  if (/^audio\//i.test(mime) && !PLAYLIST_MIME.test(mime)) return true;
   const p = urlPathOf(item.url);
   const base = p.split('/').pop() || '';
   if (AUDIO_EXT_RE.test(p)) return true;

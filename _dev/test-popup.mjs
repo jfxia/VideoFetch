@@ -375,6 +375,44 @@ console.log('\n[7] 纯音频源不进视频列表');
   ok(/CMAF_VIDEO_ONLY_AUDIO_TRACK|HLS/.test(textOf(list.children[0])), '含 video 字样的不误判为音轨');
 }
 
+/* ---------- 7b. 清单以 audio/x-mpegurl 返回：视频不能被塞进音轨区 ---------- */
+console.log('\n[7b] audio/x-mpegurl 的清单不能被当成纯音轨');
+{
+  const HOST = 'https://c.surrit.com/9c01dab6-d720-491f-ad7a-ed7d909db8d5';
+  const M = HOST + '/playlist.m3u8';
+  vm.runInContext(`probeCache.set(${JSON.stringify(M)}, ${JSON.stringify({
+    ok: true, type: 'master', live: false, duration: 5400,
+    variants: [
+      { index: 0, label: '1920x1080 · 7666kbps', bandwidth: 7666472, codecs: 'avc1.640028,mp4a.40.2', resolution: { width: 1920, height: 1080 }, uri: HOST + '/1080p/video.m3u8', duration: 5400 },
+      { index: 1, label: '1280x720 · 4181kbps', bandwidth: 4181438, codecs: 'avc1.64001f,mp4a.40.2', resolution: { width: 1280, height: 720 }, uri: HOST + '/720p/video.m3u8', duration: 5400 }
+    ]
+  })})`, ctx);
+
+  const mk = (id, url, type, mime) => ({
+    id, url, type, mime, size: 0, title: 'jqj-007', host: new URL(url).hostname,
+    frameId: 0, from: 'page', ts: Date.now()
+  });
+  vm.runInContext(`items = ${JSON.stringify([
+    mk('s1', M, 'hls', 'audio/x-mpegurl'),
+    mk('s2', HOST + '/720p/video.m3u8', 'hls', 'audio/x-mpegurl'),
+    mk('s3', 'https://cdn.example.com/clips/song.m4a', 'file', 'audio/mp4')
+  ])}`, ctx);
+  vm.runInContext('renderSources()', ctx);
+
+  const list = nodes.get('src-list');
+  const first = list.children[0];
+  ok(/HLS/.test(textOf(first)), '首块按视频展示', textOf(first).slice(0, 40));
+  ok(!/下载音频/.test(textOf(first)), '不给「下载音频」按钮', textOf(first).slice(0, 60));
+  ok(!/仅声音/.test(textOf(first)), '不标「仅声音 · 无画面」');
+  ok(/1920x1080|1280x720|2 档/.test(textOf(first)), '档位仍可切换', textOf(first).slice(0, 60));
+  ok(nodes.get('badge-src').textContent === '1', '视频计数为 1', nodes.get('badge-src').textContent);
+
+  // 同页里的真音轨仍要单独收起
+  const more = list.children[list.children.length - 1];
+  const btn = more && more.children && more.children.find((c) => c.tagName === 'button');
+  ok(btn && /另有 1 个纯音频源/.test(textOf(btn)), '真音轨仍归到折叠区', btn ? textOf(btn) : '(无)');
+}
+
 /* ---------- 8. 任务卡的暂停 / 继续 / 保存 ---------- */
 console.log('\n[8] 任务卡：暂停 / 继续 / 保存');
 {

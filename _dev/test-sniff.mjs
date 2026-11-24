@@ -331,6 +331,33 @@ console.log('\n[6] 图标角标：红点只数视频卡片');
   ok(lastBadge(99) === undefined, '无视频的标签页不显示红点');
 }
 
+console.log('\n[6b] 清单以 audio/x-mpegurl 返回时仍算视频');
+{
+  const hit = (url, mime, type = 'hls') =>
+    fireHeaders({
+      url,
+      tabId: 45,
+      type: 'xmlhttprequest',
+      frameId: 0,
+      initiator: 'https://missav.live',
+      documentUrl: 'https://missav.live/ja/x',
+      responseHeaders: [{ name: 'content-type', value: mime }]
+    });
+
+  // m3u8 的 MIME 本来就允许是 audio/x-mpegurl，与「只有声音」无关
+  hit('https://c.surrit.com/9c01dab6-d720-491f-ad7a-ed7d909db8d5/playlist.m3u8', 'audio/x-mpegurl');
+  await sleep(60);
+  ok(lastBadge(45) === '1', '清单为 audio/x-mpegurl 的视频计入红点', 'text=' + lastBadge(45));
+  const r6b = await fireMsg({ target: 'sw', type: 'list', tabId: 45 });
+  ok(r6b.items.length === 1 && r6b.items[0].type === 'hls', '收入列表并判为 hls', 'items=' + r6b.items.length);
+  ok(r6b.items[0] && /audio\/x-mpegurl/.test(r6b.items[0].mime), '保留原始 MIME 供弹窗判定', r6b.items[0] && r6b.items[0].mime);
+
+  // 真正的音轨仍然不计入
+  hit('https://cdn.example.com/clips/song.m4a', 'audio/mp4', 'file');
+  await sleep(60);
+  ok(lastBadge(45) === '1', '真音轨仍不计入红点', 'text=' + lastBadge(45));
+}
+
 console.log('\n[7] 非媒体内容不进列表');
 {
   const before = (await fireMsg({ target: 'sw', type: 'list', tabId: 43 })).items.length;
