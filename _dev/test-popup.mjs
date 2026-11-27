@@ -835,9 +835,17 @@ console.log('\n[13] 列表高度按内容定，窗口装不下时才收');
   vm.runInContext('fitView()', ctx);
   ok(src.style.maxHeight === '260px', '量的是当前可见的那个视图', src.style.maxHeight);
 
-  // 归位，后面的用例继续按任务页跑
+  // 两个界面走的是同一套算法：同样的内容高度落到同样的上限，不因为换页而不同
+  src.scrollHeight = 900;
+  box.scrollHeight = 900;
+  vm.runInContext('lastNeed = -1; lastViewEl = null; fitView()', ctx);
+  const srcMax = src.style.maxHeight;
   idEl('view-tasks').hidden = false;
   idEl('view-sources').hidden = true;
+  vm.runInContext('lastNeed = -1; lastViewEl = null; fitView()', ctx);
+  ok(srcMax === '461px' && box.style.maxHeight === srcMax, '视频源与下载任务算出同一个上限', srcMax + ' / ' + box.style.maxHeight);
+
+  // 归位，后面的用例继续按任务页跑
   box.scrollHeight = 0;
   vm.runInContext('lastNeed = -1; lastWin = 0; lastViewEl = null', ctx);
 }

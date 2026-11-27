@@ -146,7 +146,7 @@ node _dev/serve.mjs 8898        # 夹具在 http://127.0.0.1:8898/player.html
 node _dev/test-e2e.mjs          #  38  解析 / 转封装 / 解密
 node _dev/test-engine.mjs       #  64  引擎全流程（mock chrome API）
 node _dev/test-merge.mjs        #  41  fMP4 音轨合并
-node _dev/test-popup.mjs        # 130  源列表、档位选择、任务卡按钮、失败重试、列表高度
+node _dev/test-popup.mjs        # 131  源列表、档位选择、任务卡按钮、失败重试、列表高度
 node _dev/test-settings.mjs     #  84  子目录规整、设置读写、词表对齐、写自定义文件夹
 node _dev/test-sniff.mjs        #  71  后台嗅探、归属、角标、重试与按页归属
 node _dev/test-inject.mjs       #  36  页面 hook（vm 沙箱）
@@ -155,7 +155,7 @@ node _dev/test-pause.mjs        # 116  暂停 / 继续 / 快照保存 / 失败�
 node _dev/test-store.mjs        #  25  临时存储与清理（内存版 OPFS）
 ```
 
-合计 628 项断言。右侧数字为该套件的断言条数。夹具为 ffmpeg 生成的真实媒体，另有一组取自线上 HLS 的 CMAF 分片，用于覆盖「分离音轨合并」这条路径。
+合计 629 项断言。右侧数字为该套件的断言条数。夹具为 ffmpeg 生成的真实媒体，另有一组取自线上 HLS 的 CMAF 分片，用于覆盖「分离音轨合并」这条路径。
 
 ## 已知限制
 
