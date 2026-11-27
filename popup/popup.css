@@ -137,9 +137,12 @@ body {
 
 /* ---------- 列表 ---------- */
 .view {
-  flex: 1;
+  flex: 1 1 auto;
+  /* 滚动容器在 flex 里的自动最小尺寸是 0，不写会让列表顶开页脚 */
+  min-height: 0;
   overflow-y: auto;
   padding: 10px 12px;
+  /* 上限由 fitView() 按弹窗实测高度写成行内样式，这个值只兜住脚本跑起来之前的一帧 */
   max-height: 452px;
 }
 

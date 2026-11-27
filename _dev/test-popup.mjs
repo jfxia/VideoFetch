@@ -22,6 +22,7 @@ function ok(cond, label, extra) {
 }
 
 /* ---------- 最小 DOM ---------- */
+const SHELL = { '.topbar': 49, '.tabs': 53, '.foot': 37 };
 const nodes = new Map();
 const sent = [];
 const dl = { opened: [], shown: [], folders: 0, failOpen: false };
@@ -37,6 +38,8 @@ function makeEl(tag) {
     hidden: false,
     style: {},
     dataset: {},
+    scrollHeight: 0,
+    offsetHeight: 0,
     children: [],
     classList: {
       _s: new Set(),
@@ -117,6 +120,18 @@ const ctx = {
     getElementById: idEl,
     createElement: makeEl,
     querySelectorAll: () => [],
+    querySelector(sel) {
+      // fitView() 只需要两类选择器：当前可见的视图、以及顶栏/标签栏/页脚
+      if (sel === 'main.view:not([hidden])') {
+        for (const id of ['view-sources', 'view-tasks', 'view-diag']) {
+          const n = nodes.get(id);
+          if (n && !n.hidden) return n;
+        }
+        return null;
+      }
+      if (SHELL[sel] != null) return { offsetHeight: SHELL[sel] };
+      return null;
+    },
     body: makeEl('body')
   },
   navigator: { language: 'zh-CN', languages: ['zh-CN'], clipboard: { writeText() {} } },
@@ -144,6 +159,7 @@ const ctx = {
     }
   }
 };
+ctx.innerHeight = 600;
 ctx.window = ctx;
 ctx.globalThis = ctx;
 vm.createContext(ctx);
@@ -756,6 +772,59 @@ console.log('\n[12] 无大小的直链自动探测补齐');
   ok(sent.filter((m) => m.type === 'probe-size').length === before2 + 1, '可疑小值触发重新探测');
   ok(!/552 B/.test(textOf(nodes.get('src-list').children[0])), '卡片不再显示 552 B', textOf(nodes.get('src-list').children[0]));
   ctx.chrome.runtime.sendMessage = origSend;
+}
+
+/* ---------- 13. 列表高度按视口算：只留一个滚动条，页脚不滚走 ---------- */
+console.log('\n[13] 列表高度上限按视口实测');
+{
+  const chrome = SHELL['.topbar'] + SHELL['.tabs'] + SHELL['.foot']; // 139
+
+  // 纯计算：视口 - 外壳，内容更矮时按内容收
+  const calc = (vp, need) => vm.runInContext(`listMaxHeight(${vp}, ${chrome}, ${need})`, ctx);
+  ok(calc(600, 900) === 461, '600 高的弹窗：列表上限 461 = 600 - 139', String(calc(600, 900)));
+  ok(calc(440, 900) === 301, '视口只有 440 时按 440 算，不沿用固定 452', String(calc(440, 900)));
+  ok(calc(600, 200) === 200, '内容比可用空间矮时按内容收，不留空白', String(calc(600, 200)));
+  ok(calc(300, 900) === 161, '极端小的视口也不会算出负值/0', String(calc(300, 900)));
+  ok(calc(600, 900) + chrome === 600, '外壳 + 列表刚好等于视口，文档不溢出（外层滚动条的来源）');
+  ok(calc(440, 900) + chrome === 440, '视口不足 600 时同样刚好铺满');
+
+  // 真实 fitView：写进 style.maxHeight，页面高度不超过视口
+  const box = idEl('view-tasks');
+  box.hidden = false;
+  idEl('view-sources').hidden = true;
+  box.scrollHeight = 900;
+
+  ctx.innerHeight = 600;
+  vm.runInContext('fitView()', ctx);
+  ok(box.style.maxHeight === '461px', '视口 600：写 461px', box.style.maxHeight);
+
+  ctx.innerHeight = 440; // 弹窗被浏览器窗口/屏幕限制住的情形
+  vm.runInContext('fitView()', ctx);
+  ok(box.style.maxHeight === '301px', '视口 440：改写成 301px（原先固定 452 就溢出）', box.style.maxHeight);
+
+  // 在普通标签页里打开（视口远高于弹窗）时按弹窗上限 600 算，样式与装好后一致
+  ctx.innerHeight = 900;
+  vm.runInContext('fitView()', ctx);
+  ok(box.style.maxHeight === '461px', '视口 900：仍按 600 的上限算', box.style.maxHeight);
+
+  // 列表变短后要能收回，否则会留一大片空白
+  box.scrollHeight = 180;
+  ctx.innerHeight = 600;
+  vm.runInContext('fitView()', ctx);
+  ok(box.style.maxHeight === '180px', '内容变短后按内容收（不残留上一次的上限）', box.style.maxHeight);
+
+  // 换到另一个视图时，量的应是新视图
+  idEl('view-tasks').hidden = true;
+  idEl('view-sources').hidden = false;
+  const src = idEl('view-sources');
+  src.scrollHeight = 260;
+  vm.runInContext('fitView()', ctx);
+  ok(src.style.maxHeight === '260px', '量的是当前可见的那个视图', src.style.maxHeight);
+
+  // 归位，后面的用例继续按任务页跑
+  idEl('view-tasks').hidden = false;
+  idEl('view-sources').hidden = true;
+  box.scrollHeight = 0;
 }
 
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');

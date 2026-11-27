@@ -142,7 +142,7 @@ node _dev/serve.mjs 8898        # fixtures at http://127.0.0.1:8898/player.html
 node _dev/test-e2e.mjs          #  38  parsing / remuxing / decryption
 node _dev/test-engine.mjs       #  64  full engine runs against a mocked chrome API
 node _dev/test-merge.mjs        #  41  fMP4 audio merging
-node _dev/test-popup.mjs        # 116  source list, quality picker, task buttons, retry, English UI
+node _dev/test-popup.mjs        # 127  source list, quality picker, task buttons, retry, English UI
 node _dev/test-settings.mjs     #  84  subfolder normalisation, settings, i18n, custom folder writing
 node _dev/test-sniff.mjs        #  71  background sniffing, attribution, the badge, retry and per-page scope
 node _dev/test-inject.mjs       #  36  page hooks in a VM sandbox
@@ -151,7 +151,7 @@ node _dev/test-pause.mjs        # 116  pause / resume / snapshot saving / retry 
 node _dev/test-store.mjs        #  25  staging and cleanup against an in-memory OPFS
 ```
 
-614 assertions in total. The number on the right of each suite is its assertion count. The fixtures are real media generated with ffmpeg, plus one CMAF set taken from a live HLS feed to cover the split-audio path.
+625 assertions in total. The number on the right of each suite is its assertion count. The fixtures are real media generated with ffmpeg, plus one CMAF set taken from a live HLS feed to cover the split-audio path.
 
 ## Known limits
 

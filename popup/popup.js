@@ -107,6 +107,67 @@ async function openSaved(id) {
   }
 }
 
+/* ---------------- 布局：列表高度 ---------------- */
+
+/** 浏览器给弹窗的高度上限；真正可用的高度取它和视口的较小者 */
+const POPUP_MAX_H = 600;
+
+/**
+ * 列表能占多高：视口减去顶栏、标签栏、页脚，内容本身更矮时按内容收（不留空白）。
+ * 纯计算，便于测试。
+ */
+function listMaxHeight(viewport, chromeH, needed) {
+  const avail = Math.max(120, Math.round(Number(viewport) || 0) - Math.round(Number(chromeH) || 0));
+  const want = Math.max(0, Math.round(Number(needed) || 0));
+  return Math.max(0, Math.min(want, avail));
+}
+
+/**
+ * 把当前视图的高度上限写进 style。
+ * 先前是 CSS 里定死 452px（按弹窗最高 600px 反推），可弹窗的实际视口受浏览器窗口与
+ * 屏幕可用高度限制，没有 600px 时整份文档会溢出：右下角出现第二个滚动条，页脚（速率）
+ * 也随页面滚出视野。改成按实测视口算，列表成为唯一的滚动容器，页脚始终留在底部。
+ */
+function fitView() {
+  if (typeof document.querySelector !== 'function') return; // 测试桩没有选择器
+  let view = null;
+  try {
+    view = document.querySelector('main.view:not([hidden])');
+  } catch {
+    return;
+  }
+  if (!view) return;
+
+  let chromeH = 0;
+  for (const sel of ['.topbar', '.tabs', '.foot']) {
+    let e = null;
+    try {
+      e = document.querySelector(sel);
+    } catch {}
+    if (e) chromeH += e.offsetHeight || 0;
+  }
+
+  // 量不到视口（脚本环境、视口尚未建立）时交回 CSS 里的兜底值
+  const vh = Number(window.innerHeight) || 0;
+  if (!vh) {
+    view.style.maxHeight = '';
+    return;
+  }
+
+  // 在普通标签页里打开时视口远高于弹窗，仍按弹窗的上限算，样式才和装好后一致
+  const h = listMaxHeight(Math.min(vh, POPUP_MAX_H), chromeH, view.scrollHeight || 0);
+  view.style.maxHeight = h ? h + 'px' : '';
+}
+
+/**
+ * 渲染完就量：先同步算一次，首帧即是终值（不会先闪一个溢出的滚动条）；
+ * 再排一帧复校，字体、换行落定后内容高度可能还会变。
+ */
+function scheduleFit() {
+  fitView();
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(fitView);
+}
+
 /* ---------------- 初始化 ---------------- */
 async function init() {
   bootLang();
@@ -159,6 +220,7 @@ function showView(name) {
     renderDiag();
     reload();
   }
+  scheduleFit();
 }
 
 function bindEvents() {
@@ -214,6 +276,11 @@ function bindEvents() {
       renderTasks();
     }
   });
+
+  // 弹窗尺寸会随内容变化，也受浏览器窗口与屏幕可用高度限制：变一次就重算列表上限
+  if (typeof window.addEventListener === 'function') {
+    window.addEventListener('resize', scheduleFit);
+  }
 }
 
 async function reload() {
@@ -615,6 +682,7 @@ function renderSources() {
       hint.appendChild(el('div', 'note', t('src.playThenRefresh')));
     }
     hint.appendChild(el('div', 'note', t('src.diagHint')));
+    scheduleFit();
     return;
   }
   hint.classList.add('hide');
@@ -635,6 +703,7 @@ function renderSources() {
         btn.textContent = box.hidden
           ? t('audio.more', { n: audioGroups.length })
           : t('audio.less', { n: audioGroups.length });
+        scheduleFit();
       });
       wrap.appendChild(btn);
       wrap.appendChild(box);
@@ -642,6 +711,7 @@ function renderSources() {
       list.appendChild(wrap);
     }
   }
+  scheduleFit();
 }
 
 function groupCard(group, opts = {}) {
@@ -854,6 +924,7 @@ function renderDiag() {
   box.textContent = '';
   if (!diag) {
     box.appendChild(el('div', 'diag-note', t('diag.empty')));
+    scheduleFit();
     return;
   }
   const g = diag.global || {};
@@ -903,6 +974,7 @@ function renderDiag() {
       box.appendChild(d);
     });
   }
+  scheduleFit();
 }
 
 function renderTasks() {
@@ -915,6 +987,7 @@ function renderTasks() {
   if (!tasks.length) {
     hint.classList.remove('hide');
     $('foot-info').textContent = t('foot.waiting');
+    scheduleFit();
     return;
   }
   hint.classList.add('hide');
@@ -936,6 +1009,7 @@ function renderTasks() {
   } else {
     $('foot-info').textContent = t('foot.count', { n: tasks.length });
   }
+  scheduleFit();
 }
 
 function taskCard(task) {
