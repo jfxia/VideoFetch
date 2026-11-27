@@ -109,54 +109,113 @@ async function openSaved(id) {
 
 /* ---------------- 布局：列表高度 ---------------- */
 
-/** 浏览器给弹窗的高度上限；真正可用的高度取它和视口的较小者 */
+/** 浏览器给弹窗的高度上限 */
 const POPUP_MAX_H = 600;
+/** 列表的保底高度：窗口再挤，也留得下一张卡片 */
+const LIST_MIN_H = 120;
+/** 改完高度要等浏览器把弹窗调好，这个时长之后再评估一次 */
+const FIT_SETTLE_MS = 160;
 
 /**
- * 列表能占多高：视口减去顶栏、标签栏、页脚，内容本身更矮时按内容收（不留空白）。
+ * 列表能占多高：内容多高就多高，上限是 cap（弹窗上限减去顶栏、标签栏、页脚）。
  * 纯计算，便于测试。
  */
-function listMaxHeight(viewport, chromeH, needed) {
-  const avail = Math.max(120, Math.round(Number(viewport) || 0) - Math.round(Number(chromeH) || 0));
+function listMaxHeight(cap, needed) {
+  const max = Math.max(LIST_MIN_H, Math.round(Number(cap) || 0));
   const want = Math.max(0, Math.round(Number(needed) || 0));
-  return Math.max(0, Math.min(want, avail));
+  return Math.min(want, max);
 }
 
-/**
- * 把当前视图的高度上限写进 style。
- * 先前是 CSS 里定死 452px（按弹窗最高 600px 反推），可弹窗的实际视口受浏览器窗口与
- * 屏幕可用高度限制，没有 600px 时整份文档会溢出：右下角出现第二个滚动条，页脚（速率）
- * 也随页面滚出视野。改成按实测视口算，列表成为唯一的滚动容器，页脚始终留在底部。
- */
-function fitView() {
-  if (typeof document.querySelector !== 'function') return; // 测试桩没有选择器
-  let view = null;
-  try {
-    view = document.querySelector('main.view:not([hidden])');
-  } catch {
-    return;
-  }
-  if (!view) return;
+let settleTimer = null;
+let lastNeed = -1; // 上次定高时列表的内容高度，用来判断内容变没变
+let lastWin = 0;   // 见过的最大视口高度：只增，用来判断窗口是不是真的变高了
+let lastViewEl = null;
 
-  let chromeH = 0;
+function shellHeight() {
+  let h = 0;
   for (const sel of ['.topbar', '.tabs', '.foot']) {
     let e = null;
     try {
       e = document.querySelector(sel);
     } catch {}
-    if (e) chromeH += e.offsetHeight || 0;
+    if (e) h += e.offsetHeight || 0;
   }
+  return h;
+}
 
-  // 量不到视口（脚本环境、视口尚未建立）时交回 CSS 里的兜底值
+function visibleView() {
+  try {
+    return document.querySelector('main.view:not([hidden])');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 按内容定高：内容多高列表就多高，上限是弹窗的 600 减去外壳。
+ *
+ * 这里不拿 window.innerHeight 反推可用高度。弹窗的高度是被文档撑起来的（浏览器再按
+ * 窗口和屏幕给个顶），文档刚变高的那一瞬 innerHeight 还是上一帧的旧值：v1.0.30 用
+ * 它算上限，首屏只有一条任务时算出的一百来像素就写成了上限，弹窗跟着缩到这个高度，
+ * 之后内容再多也长不回去——下载页只看得见一条任务，就是这么来的。
+ * 窗口确实装不下的情况交给 settleFit()：等弹窗长定了再收。
+ */
+function fitView() {
+  if (typeof document.querySelector !== 'function') return; // 测试桩没有选择器
+  const view = visibleView();
+  if (!view) return;
+
+  // 量不到视口（脚本环境）时交回 CSS 里的兜底值
   const vh = Number(window.innerHeight) || 0;
   if (!vh) {
     view.style.maxHeight = '';
     return;
   }
 
-  // 在普通标签页里打开时视口远高于弹窗，仍按弹窗的上限算，样式才和装好后一致
-  const h = listMaxHeight(Math.min(vh, POPUP_MAX_H), chromeH, view.scrollHeight || 0);
-  view.style.maxHeight = h ? h + 'px' : '';
+  if (view !== lastViewEl) {
+    lastViewEl = view;
+    lastNeed = -1; // 换了视图：内容高度不可比，重新量
+  }
+
+  const need = view.scrollHeight || 0;
+  // 内容没变、窗口也没变高：保持现状。弹窗被我们收矮时也会触发 resize，
+  // 不挡住就会把高度来回顶，界面上一直跳。
+  if (need === lastNeed && vh <= lastWin + 1) return;
+
+  lastNeed = need;
+  lastWin = Math.max(lastWin, vh);
+  view.style.maxHeight = listMaxHeight(POPUP_MAX_H - shellHeight(), need) + 'px';
+  scheduleSettle();
+}
+
+/**
+ * 弹窗长定之后再评估一次：窗口装不下内容时把列表收到可用高度，页脚才留在视野里。
+ * 此刻浏览器已经给足了高度（能长高早就长高了），innerHeight 可信。
+ */
+function settleFit() {
+  const view = visibleView();
+  if (!view) return;
+  const vh = Number(window.innerHeight) || 0;
+  if (!vh) return;
+
+  const shellH = shellHeight();
+  lastWin = Math.max(lastWin, vh);
+  if ((view.scrollHeight || 0) + shellH <= vh + 1) return; // 装得下，不用动
+
+  const avail = Math.max(LIST_MIN_H, vh - shellH);
+  if (pxOf(view.style.maxHeight) <= avail) return; // 已经收过了
+  view.style.maxHeight = avail + 'px';
+}
+
+/** 行内 max-height 的数值（"461px" → 461）；量不到按 0 */
+function pxOf(v) {
+  return Number(String(v || '').replace(/[^\d.]/g, '')) || 0;
+}
+
+function scheduleSettle() {
+  if (typeof setTimeout !== 'function') return;
+  clearTimeout(settleTimer);
+  settleTimer = setTimeout(settleFit, FIT_SETTLE_MS);
 }
 
 /**

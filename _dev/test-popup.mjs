@@ -774,42 +774,56 @@ console.log('\n[12] 无大小的直链自动探测补齐');
   ctx.chrome.runtime.sendMessage = origSend;
 }
 
-/* ---------- 13. 列表高度按视口算：只留一个滚动条，页脚不滚走 ---------- */
-console.log('\n[13] 列表高度上限按视口实测');
+/* ---------- 13. 列表高度按内容定，窗口装不下时才收 ---------- */
+console.log('\n[13] 列表高度按内容定，窗口装不下时才收');
 {
   const chrome = SHELL['.topbar'] + SHELL['.tabs'] + SHELL['.foot']; // 139
+  const cap = 600 - chrome; // 461
 
-  // 纯计算：视口 - 外壳，内容更矮时按内容收
-  const calc = (vp, need) => vm.runInContext(`listMaxHeight(${vp}, ${chrome}, ${need})`, ctx);
-  ok(calc(600, 900) === 461, '600 高的弹窗：列表上限 461 = 600 - 139', String(calc(600, 900)));
-  ok(calc(440, 900) === 301, '视口只有 440 时按 440 算，不沿用固定 452', String(calc(440, 900)));
-  ok(calc(600, 200) === 200, '内容比可用空间矮时按内容收，不留空白', String(calc(600, 200)));
-  ok(calc(300, 900) === 161, '极端小的视口也不会算出负值/0', String(calc(300, 900)));
-  ok(calc(600, 900) + chrome === 600, '外壳 + 列表刚好等于视口，文档不溢出（外层滚动条的来源）');
-  ok(calc(440, 900) + chrome === 440, '视口不足 600 时同样刚好铺满');
+  // 纯计算：内容多高就多高，封顶 600 - 外壳
+  const calc = (c, need) => vm.runInContext(`listMaxHeight(${c}, ${need})`, ctx);
+  ok(cap === 461, '弹窗上限 600 减外壳 139，列表可用 461');
+  ok(calc(cap, 900) === 461, '长列表封顶 461', String(calc(cap, 900)));
+  ok(calc(cap, 200) === 200, '内容更矮时按内容收，不留空白', String(calc(cap, 200)));
+  ok(calc(cap, 0) === 0, '空列表收到 0', String(calc(cap, 0)));
+  ok(calc(10, 900) === 120, '可用空间异常小时保底 120，不会算出 0', String(calc(10, 900)));
+  // 任务卡高约 114（标题 + 进度条 + 明细 + 按钮），间距 8，列表内边距 20
+  ok(cap >= 3 * 114 + 2 * 8 + 20, '461 放得下 3 条任务卡（约 378）', String(cap));
 
-  // 真实 fitView：写进 style.maxHeight，页面高度不超过视口
   const box = idEl('view-tasks');
   box.hidden = false;
   idEl('view-sources').hidden = true;
   box.scrollHeight = 900;
+  vm.runInContext('lastNeed = -1; lastWin = 0; lastViewEl = null', ctx);
 
+  // 首屏：弹窗还没长开，innerHeight 只是「一条任务」的高度，不能拿它反推上限
+  ctx.innerHeight = 240;
+  vm.runInContext('fitView()', ctx);
+  ok(box.style.maxHeight === '461px', '首屏视口只有 240 也按内容给 461（旧版缩成 120，只看得见一条）', box.style.maxHeight);
+
+  // 弹窗长到 600 后评估：装得下，什么都不用改
+  ctx.innerHeight = 600;
+  vm.runInContext('fitView(); settleFit()', ctx);
+  ok(box.style.maxHeight === '461px', '弹窗长到 600：仍是 461，页脚留在视野里', box.style.maxHeight);
+
+  // 窗口只有 440：弹窗长不上去，这时才收
+  vm.runInContext('lastNeed = -1; lastWin = 0; lastViewEl = null', ctx);
+  ctx.innerHeight = 440;
+  vm.runInContext('fitView(); settleFit()', ctx);
+  ok(box.style.maxHeight === '301px', '窗口只有 440 时收到 301，文档不溢出（外层滚动条的来源）', box.style.maxHeight);
+  ok(301 + chrome === 440, '外壳 + 列表刚好等于视口');
+
+  // 收矮后弹窗自己会发一次 resize：不能借机顶回去，否则界面一直跳
+  vm.runInContext('fitView()', ctx);
+  ok(box.style.maxHeight === '301px', '收矮后的 resize 不会把高度顶回去', box.style.maxHeight);
+
+  // 窗口真的变大了要能长回去
   ctx.innerHeight = 600;
   vm.runInContext('fitView()', ctx);
-  ok(box.style.maxHeight === '461px', '视口 600：写 461px', box.style.maxHeight);
-
-  ctx.innerHeight = 440; // 弹窗被浏览器窗口/屏幕限制住的情形
-  vm.runInContext('fitView()', ctx);
-  ok(box.style.maxHeight === '301px', '视口 440：改写成 301px（原先固定 452 就溢出）', box.style.maxHeight);
-
-  // 在普通标签页里打开（视口远高于弹窗）时按弹窗上限 600 算，样式与装好后一致
-  ctx.innerHeight = 900;
-  vm.runInContext('fitView()', ctx);
-  ok(box.style.maxHeight === '461px', '视口 900：仍按 600 的上限算', box.style.maxHeight);
+  ok(box.style.maxHeight === '461px', '窗口变大后重新按内容给高', box.style.maxHeight);
 
   // 列表变短后要能收回，否则会留一大片空白
   box.scrollHeight = 180;
-  ctx.innerHeight = 600;
   vm.runInContext('fitView()', ctx);
   ok(box.style.maxHeight === '180px', '内容变短后按内容收（不残留上一次的上限）', box.style.maxHeight);
 
@@ -825,6 +839,7 @@ console.log('\n[13] 列表高度上限按视口实测');
   idEl('view-tasks').hidden = false;
   idEl('view-sources').hidden = true;
   box.scrollHeight = 0;
+  vm.runInContext('lastNeed = -1; lastWin = 0; lastViewEl = null', ctx);
 }
 
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');
