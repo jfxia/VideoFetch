@@ -774,8 +774,8 @@ console.log('\n[12] 无大小的直链自动探测补齐');
   ctx.chrome.runtime.sendMessage = origSend;
 }
 
-/* ---------- 13. 列表高度按内容定，窗口装不下时才收 ---------- */
-console.log('\n[13] 列表高度按内容定，窗口装不下时才收');
+/* ---------- 13. 列表高度：三个视图共用一个上限，切标签不跳 ---------- */
+console.log('\n[13] 列表高度：三个视图共用一个上限');
 {
   const chrome = SHELL['.topbar'] + SHELL['.tabs'] + SHELL['.foot']; // 139
   const cap = 600 - chrome; // 461
@@ -791,63 +791,78 @@ console.log('\n[13] 列表高度按内容定，窗口装不下时才收');
   ok(cap >= 3 * 114 + 2 * 8 + 20, '461 放得下 3 条任务卡（约 378）', String(cap));
 
   const box = idEl('view-tasks');
+  const src = idEl('view-sources');
+  const diag = idEl('view-diag');
+  const reset = () => vm.runInContext('wantH = 0; appliedH = -1; winCap = Infinity; lastVh = 0', ctx);
+  reset();
+
+  // 视频源 6 条（高 900 → 封顶）、下载任务 3 条（400）、诊断页空
   box.hidden = false;
-  idEl('view-sources').hidden = true;
-  box.scrollHeight = 900;
-  vm.runInContext('lastNeed = -1; lastWin = 0; lastViewEl = null', ctx);
+  src.hidden = true;
+  box.scrollHeight = 400;
+  src.scrollHeight = 900;
+  diag.scrollHeight = 20;
 
   // 首屏：弹窗还没长开，innerHeight 只是「一条任务」的高度，不能拿它反推上限
   ctx.innerHeight = 240;
   vm.runInContext('fitView()', ctx);
   ok(box.style.maxHeight === '461px', '首屏视口只有 240 也按内容给 461（旧版缩成 120，只看得见一条）', box.style.maxHeight);
+  ok(src.style.maxHeight === '461px' && diag.style.maxHeight === '461px', '三个视图一次写齐，切换时没有错高的一帧',
+    [box.style.maxHeight, src.style.maxHeight, diag.style.maxHeight].join(' / '));
 
-  // 弹窗长到 600 后评估：装得下，什么都不用改
-  ctx.innerHeight = 600;
-  vm.runInContext('fitView(); settleFit()', ctx);
-  ok(box.style.maxHeight === '461px', '弹窗长到 600：仍是 461，页脚留在视野里', box.style.maxHeight);
-
-  // 窗口只有 440：弹窗长不上去，这时才收
-  vm.runInContext('lastNeed = -1; lastWin = 0; lastViewEl = null', ctx);
-  ctx.innerHeight = 440;
-  vm.runInContext('fitView(); settleFit()', ctx);
-  ok(box.style.maxHeight === '301px', '窗口只有 440 时收到 301，文档不溢出（外层滚动条的来源）', box.style.maxHeight);
-  ok(301 + chrome === 440, '外壳 + 列表刚好等于视口');
-
-  // 收矮后弹窗自己会发一次 resize：不能借机顶回去，否则界面一直跳
+  // 切到下载任务（内容只有 400）：高度不动，否则窗口当场缩 61px，来回点就是「整页在抖」
+  src.hidden = false;
+  box.hidden = true;
   vm.runInContext('fitView()', ctx);
-  ok(box.style.maxHeight === '301px', '收矮后的 resize 不会把高度顶回去', box.style.maxHeight);
+  ok(box.style.maxHeight === '461px' && src.style.maxHeight === '461px', '切标签不改变高度：三个视图仍是 461',
+    [src.style.maxHeight, box.style.maxHeight].join(' / '));
 
-  // 窗口真的变大了要能长回去
-  ctx.innerHeight = 600;
+  // 两条都短（源 300、任务 400）：按高的那个来，仍是同一个值
+  src.scrollHeight = 300;
   vm.runInContext('fitView()', ctx);
-  ok(box.style.maxHeight === '461px', '窗口变大后重新按内容给高', box.style.maxHeight);
+  ok(src.style.maxHeight === '400px' && box.style.maxHeight === '400px', '都短时取最高的那个，两页仍是同一个值',
+    [src.style.maxHeight, box.style.maxHeight].join(' / '));
 
-  // 列表变短后要能收回，否则会留一大片空白
-  box.scrollHeight = 180;
+  // 全部为空（只剩提示语）：收起来
+  src.scrollHeight = 100;
+  box.scrollHeight = 100;
+  diag.scrollHeight = 20;
   vm.runInContext('fitView()', ctx);
-  ok(box.style.maxHeight === '180px', '内容变短后按内容收（不残留上一次的上限）', box.style.maxHeight);
+  ok(src.style.maxHeight === '100px', '三个视图都空时按提示语的高度收起', src.style.maxHeight);
 
-  // 换到另一个视图时，量的应是新视图
-  idEl('view-tasks').hidden = true;
-  idEl('view-sources').hidden = false;
-  const src = idEl('view-sources');
-  src.scrollHeight = 260;
-  vm.runInContext('fitView()', ctx);
-  ok(src.style.maxHeight === '260px', '量的是当前可见的那个视图', src.style.maxHeight);
-
-  // 两个界面走的是同一套算法：同样的内容高度落到同样的上限，不因为换页而不同
+  // 窗口只有 440：弹窗长不上去，长定之后才收
   src.scrollHeight = 900;
   box.scrollHeight = 900;
-  vm.runInContext('lastNeed = -1; lastViewEl = null; fitView()', ctx);
-  const srcMax = src.style.maxHeight;
-  idEl('view-tasks').hidden = false;
-  idEl('view-sources').hidden = true;
-  vm.runInContext('lastNeed = -1; lastViewEl = null; fitView()', ctx);
-  ok(srcMax === '461px' && box.style.maxHeight === srcMax, '视频源与下载任务算出同一个上限', srcMax + ' / ' + box.style.maxHeight);
+  reset();
+  ctx.innerHeight = 440;
+  vm.runInContext('fitView(); settleFit()', ctx);
+  ok(src.style.maxHeight === '301px' && box.style.maxHeight === '301px', '窗口只有 440 时收到 301，文档不溢出',
+    [src.style.maxHeight, box.style.maxHeight].join(' / '));
+  ok(301 + chrome === 440, '外壳 + 列表刚好等于视口');
+
+  // 收矮之后弹窗自己会发一次 resize：不能借机顶回去，否则界面一直跳
+  vm.runInContext('fitView(); onWinResize()', ctx);
+  ok(src.style.maxHeight === '301px', '收矮后的 resize 不会把高度顶回去', src.style.maxHeight);
+
+  // 窗口真的变大了要能重新给满
+  ctx.innerHeight = 600;
+  vm.runInContext('onWinResize()', ctx);
+  ok(src.style.maxHeight === '461px', '窗口变大后重新按内容给高', src.style.maxHeight);
+
+  // 两页同一条规则：把两边内容设成一样，落到的上限也一样
+  src.scrollHeight = 900;
+  box.scrollHeight = 900;
+  vm.runInContext('fitView()', ctx);
+  ok(src.style.maxHeight === box.style.maxHeight && src.style.maxHeight === '461px', '视频源与下载任务算出同一个上限',
+    src.style.maxHeight + ' / ' + box.style.maxHeight);
 
   // 归位，后面的用例继续按任务页跑
+  box.hidden = false;
+  src.hidden = true;
   box.scrollHeight = 0;
-  vm.runInContext('lastNeed = -1; lastWin = 0; lastViewEl = null', ctx);
+  src.scrollHeight = 0;
+  diag.scrollHeight = 0;
+  reset();
 }
 
 console.log('\n========== ' + (fail ? 'FAILED' : 'PASSED') + ' ' + pass + '/' + (pass + fail) + ' ==========');

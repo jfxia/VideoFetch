@@ -115,6 +115,14 @@ const POPUP_MAX_H = 600;
 const LIST_MIN_H = 120;
 /** 改完高度要等浏览器把弹窗调好，这个时长之后再评估一次 */
 const FIT_SETTLE_MS = 160;
+/** 三个视图共用一个列表高度：各算各的，切标签时窗口尺寸会跳 */
+const VIEW_IDS = ['view-sources', 'view-tasks', 'view-diag'];
+
+let wantH = 0;         // 按内容算出来的列表高度（还没受窗口限制）
+let appliedH = -1;     // 已经写进三个视图 style 的值
+let winCap = Infinity; // 窗口给得起的最大高度，量到一次就按它封顶
+let lastVh = 0;        // 见过的最大视口高度，只增：用来认出「窗口真的变大了」
+let settleTimer = null;
 
 /**
  * 列表能占多高：内容多高就多高，上限是 cap（弹窗上限减去顶栏、标签栏、页脚）。
@@ -126,10 +134,14 @@ function listMaxHeight(cap, needed) {
   return Math.min(want, max);
 }
 
-let settleTimer = null;
-let lastNeed = -1; // 上次定高时列表的内容高度，用来判断内容变没变
-let lastWin = 0;   // 见过的最大视口高度：只增，用来判断窗口是不是真的变高了
-let lastViewEl = null;
+function allViews() {
+  const out = [];
+  for (const id of VIEW_IDS) {
+    const v = $(id);
+    if (v) out.push(v);
+  }
+  return out;
+}
 
 function shellHeight() {
   let h = 0;
@@ -143,48 +155,53 @@ function shellHeight() {
   return h;
 }
 
-function visibleView() {
-  try {
-    return document.querySelector('main.view:not([hidden])');
-  } catch {
-    return null;
+/**
+ * 视图的内容高度。隐藏的视图是 display:none，量出来是 0，临时显出来量完立刻改回：
+ * 三句都在同一个任务里，浏览器不会画出中间那一帧。
+ */
+function contentHeightOf(view) {
+  if (!view) return 0;
+  if (!view.hidden) return view.scrollHeight || 0;
+  view.hidden = false;
+  const h = view.scrollHeight || 0;
+  view.hidden = true;
+  return h;
+}
+
+/** 三个视图一起写同一个高度：切换标签时不需要重排，也就不会有错高的一帧 */
+function applyHeight(h) {
+  h = Math.max(0, Math.round(Number(h) || 0));
+  if (h === appliedH) return;
+  appliedH = h;
+  for (const v of allViews()) {
+    v.style.maxHeight = h ? h + 'px' : '';
+    // 高度也要写死。只给上限的话，内容比别的视图矮的那个会自己缩回内容高度，
+    // 弹窗随之变矮，再被 settleFit 当成「窗口给不了这么高」，一路缩下去。
+    v.style.height = h ? h + 'px' : '';
   }
 }
 
 /**
- * 按内容定高：内容多高列表就多高，上限是弹窗的 600 减去外壳。
+ * 列表高度取三个视图里最高的那个内容高度，封顶 600 减去外壳。
  *
- * 这里不拿 window.innerHeight 反推可用高度。弹窗的高度是被文档撑起来的（浏览器再按
- * 窗口和屏幕给个顶），文档刚变高的那一瞬 innerHeight 还是上一帧的旧值：v1.0.30 用
- * 它算上限，首屏只有一条任务时算出的一百来像素就写成了上限，弹窗跟着缩到这个高度，
- * 之后内容再多也长不回去——下载页只看得见一条任务，就是这么来的。
- * 窗口确实装不下的情况交给 settleFit()：等弹窗长定了再收。
+ * 三个视图共用同一个高度，切标签时窗口尺寸完全不动。各视图按各自内容定高的话，
+ * 从长列表切到短列表要当场缩一截：文档先变矮、窗口过一帧才跟上，中间那一帧文档
+ * 比视口高，外层的滚动条一闪而过，连带宽度变化让内容重新折行——来回点几下标签，
+ * 整页看起来就在抖。
+ *
+ * 这里也不拿 window.innerHeight 反推可用高度：弹窗是被文档撑起来的，文档刚变高的
+ * 那一瞬 innerHeight 还是上一帧的旧值（首屏只有一条任务时就是一百来像素），拿它算
+ * 会把弹窗锁死在那个高度。窗口确实装不下的情况交给 settleFit()，等弹窗长定了再收。
  */
 function fitView() {
-  if (typeof document.querySelector !== 'function') return; // 测试桩没有选择器
-  const view = visibleView();
-  if (!view) return;
+  const views = allViews();
+  if (!views.length) return;
 
-  // 量不到视口（脚本环境）时交回 CSS 里的兜底值
-  const vh = Number(window.innerHeight) || 0;
-  if (!vh) {
-    view.style.maxHeight = '';
-    return;
-  }
+  let need = 0;
+  for (const v of views) need = Math.max(need, contentHeightOf(v));
 
-  if (view !== lastViewEl) {
-    lastViewEl = view;
-    lastNeed = -1; // 换了视图：内容高度不可比，重新量
-  }
-
-  const need = view.scrollHeight || 0;
-  // 内容没变、窗口也没变高：保持现状。弹窗被我们收矮时也会触发 resize，
-  // 不挡住就会把高度来回顶，界面上一直跳。
-  if (need === lastNeed && vh <= lastWin + 1) return;
-
-  lastNeed = need;
-  lastWin = Math.max(lastWin, vh);
-  view.style.maxHeight = listMaxHeight(POPUP_MAX_H - shellHeight(), need) + 'px';
+  wantH = listMaxHeight(POPUP_MAX_H - shellHeight(), need);
+  applyHeight(Math.min(wantH, winCap));
   scheduleSettle();
 }
 
@@ -193,23 +210,14 @@ function fitView() {
  * 此刻浏览器已经给足了高度（能长高早就长高了），innerHeight 可信。
  */
 function settleFit() {
-  const view = visibleView();
-  if (!view) return;
   const vh = Number(window.innerHeight) || 0;
   if (!vh) return;
+  lastVh = Math.max(lastVh, vh);
 
-  const shellH = shellHeight();
-  lastWin = Math.max(lastWin, vh);
-  if ((view.scrollHeight || 0) + shellH <= vh + 1) return; // 装得下，不用动
-
-  const avail = Math.max(LIST_MIN_H, vh - shellH);
-  if (pxOf(view.style.maxHeight) <= avail) return; // 已经收过了
-  view.style.maxHeight = avail + 'px';
-}
-
-/** 行内 max-height 的数值（"461px" → 461）；量不到按 0 */
-function pxOf(v) {
-  return Number(String(v || '').replace(/[^\d.]/g, '')) || 0;
+  const avail = Math.max(LIST_MIN_H, vh - shellHeight());
+  if (wantH <= avail) return; // 装得下，不用动
+  winCap = Math.min(winCap, avail);
+  applyHeight(Math.min(wantH, winCap));
 }
 
 function scheduleSettle() {
@@ -338,8 +346,14 @@ function bindEvents() {
 
   // 弹窗尺寸会随内容变化，也受浏览器窗口与屏幕可用高度限制：变一次就重算列表上限
   if (typeof window.addEventListener === 'function') {
-    window.addEventListener('resize', scheduleFit);
+    window.addEventListener('resize', onWinResize);
   }
+}
+
+/** 视口变高说明窗口给得起更多：之前量到的上限作废，重新按内容给 */
+function onWinResize() {
+  if ((Number(window.innerHeight) || 0) > lastVh + 1) winCap = Infinity;
+  scheduleFit();
 }
 
 async function reload() {
